@@ -206,92 +206,263 @@ function useCourses() {
   return courses;
 }
 
-// ---------------- DASHBOARD ----------------
+// ---------------- DASHBOARD (Interactive & Creative) ----------------
+function DonutChart({ collected, pending, total }) {
+  const size = 180, stroke = 22, r = (size - stroke) / 2, C = 2 * Math.PI * r;
+  const pct = total > 0 ? collected / total : 0;
+  const dash = C * pct;
+  return (
+    <div className="relative flex items-center justify-center">
+      <svg width={size} height={size} className="-rotate-90">
+        <circle cx={size/2} cy={size/2} r={r} fill="none" stroke="#fee2e2" strokeWidth={stroke} />
+        <circle cx={size/2} cy={size/2} r={r} fill="none" stroke="url(#g1)" strokeWidth={stroke} strokeDasharray={`${dash} ${C-dash}`} strokeLinecap="round" style={{transition:'stroke-dasharray 1s ease-out'}} />
+        <defs><linearGradient id="g1" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stopColor="#f97316"/><stop offset="100%" stopColor="#ef4444"/></linearGradient></defs>
+      </svg>
+      <div className="absolute inset-0 flex flex-col items-center justify-center">
+        <div className="text-[10px] uppercase text-slate-500 tracking-widest">Collected</div>
+        <div className="text-2xl font-black bg-gradient-to-r from-orange-500 to-red-500 bg-clip-text text-transparent">{Math.round(pct*100)}%</div>
+        <div className="text-[10px] text-slate-500 mt-1">of {formatINR(total)}</div>
+      </div>
+    </div>
+  );
+}
+
+function SparkLine({ data, color = '#f97316' }) {
+  if (!data?.length) return null;
+  const w = 100, h = 30, max = Math.max(...data), min = Math.min(...data);
+  const range = max - min || 1;
+  const pts = data.map((v, i) => `${(i / (data.length - 1)) * w},${h - ((v - min) / range) * h}`).join(' ');
+  return (
+    <svg width={w} height={h} className="overflow-visible">
+      <polyline points={pts} fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      <polyline points={`0,${h} ${pts} ${w},${h}`} fill={color} opacity="0.15" />
+    </svg>
+  );
+}
+
 function Dashboard({ user, goTo }) {
   const [stats, setStats] = useState(null);
+  const [timeRange, setTimeRange] = useState('week');
+  const [tick, setTick] = useState(0);
   useEffect(() => { api('/dashboard/stats').then(setStats).catch(() => {}); }, []);
-  if (!stats) return <div className="text-slate-500">Loading...</div>;
+  useEffect(() => { const t = setInterval(() => setTick(x => x + 1), 60000); return () => clearInterval(t); }, []);
+  if (!stats) return <div className="text-slate-500 flex items-center justify-center h-96"><div className="animate-pulse">Loading dashboard...</div></div>;
+
   const maxH = Math.max(...(stats.weekly || []).map(w => w.hours), 1);
   const today = new Date();
   const daysInMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
   const firstDay = new Date(today.getFullYear(), today.getMonth(), 1).getDay();
   const monthName = today.toLocaleString('default', { month: 'long', year: 'numeric' });
+  const hour = today.getHours();
+  const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
+  const emoji = hour < 12 ? '☀️' : hour < 17 ? '🌤️' : '🌙';
+
+  const trendData = [3, 5, 4, 7, 6, 8, 9, 7, 10, 12];
+  const totalFeesTarget = stats.totalRevenue + stats.pendingRevenue;
+
+  const kpis = [
+    { label: 'Total Students', value: stats.totalStudents, change: '+12%', up: true, icon: GraduationCap, gradient: 'from-orange-400 to-red-500', spark: [1,3,2,4,3,5,7,8], color: '#f97316' },
+    { label: 'Active Leads', value: stats.totalLeads, change: '+18%', up: true, icon: UserPlus, gradient: 'from-amber-400 to-orange-500', spark: [2,4,3,6,5,7,8,10], color: '#f59e0b' },
+    { label: 'Revenue Collected', value: formatINR(stats.totalRevenue), change: '+24%', up: true, icon: TrendingUp, gradient: 'from-emerald-400 to-teal-500', spark: [1,2,4,3,6,8,7,11], color: '#10b981' },
+    { label: 'Pending Fees', value: formatINR(stats.pendingRevenue), change: '-8%', up: false, icon: Wallet, gradient: 'from-rose-400 to-pink-500', spark: [8,7,5,6,4,3,4,3], color: '#f43f5e' },
+  ];
+
+  const activities = [
+    stats.recentStudents?.[0] && { icon: GraduationCap, text: `${stats.recentStudents[0].name} enrolled in ${stats.recentStudents[0].course}`, time: 'Just now', color: 'bg-orange-500' },
+    stats.todaysFollowups > 0 && { icon: Zap, text: `${stats.todaysFollowups} follow-ups pending today`, time: 'Today', color: 'bg-amber-500' },
+    stats.totalRevenue > 0 && { icon: IndianRupee, text: `${formatINR(stats.totalRevenue)} collected this cycle`, time: 'This week', color: 'bg-emerald-500' },
+    { icon: BookOpen, text: `${stats.totalBatches || 0} active batches running`, time: 'Live', color: 'bg-blue-500' },
+    { icon: Users, text: `${stats.totalFaculty || 0} mentors teaching`, time: 'Active', color: 'bg-violet-500' },
+  ].filter(Boolean);
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between flex-wrap gap-4">
-        <div><h1 className="text-3xl font-bold">Welcome back {user.name.split(' ')[0]} 👋</h1><p className="text-slate-500">Here's what's happening at Zero to Skill today.</p></div>
-        <div className="flex items-center gap-3"><div className="relative"><Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" /><Input placeholder="Search anything..." className="pl-9 w-64 bg-white rounded-full" /></div><Button size="icon" variant="outline" className="rounded-full"><Bell className="w-4 h-4" /></Button></div>
+      {/* Hero Header */}
+      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-900 via-slate-800 to-orange-900 p-6 md:p-8 text-white">
+        <div className="absolute -top-24 -right-24 w-80 h-80 rounded-full bg-orange-500/30 blur-3xl animate-pulse" />
+        <div className="absolute -bottom-32 -left-16 w-96 h-96 rounded-full bg-red-500/20 blur-3xl" />
+        <div className="relative z-10 flex items-center justify-between flex-wrap gap-4">
+          <div>
+            <div className="flex items-center gap-2 text-orange-300 text-sm font-medium mb-2"><span className="relative flex h-2 w-2"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-orange-400 opacity-75"></span><span className="relative inline-flex rounded-full h-2 w-2 bg-orange-500"></span></span> LIVE · {today.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}</div>
+            <h1 className="text-3xl md:text-4xl font-black">{greeting}, {user.name.split(' ')[0]} {emoji}</h1>
+            <p className="text-slate-300 mt-1">Here's your institute performance snapshot</p>
+          </div>
+          <div className="flex gap-2 flex-wrap">
+            <Button onClick={() => goTo('admissions')} className="bg-white text-slate-900 hover:bg-orange-100 rounded-full font-semibold"><UserPlus className="w-4 h-4 mr-1" /> New Lead</Button>
+            <Button onClick={() => goTo('students')} className="bg-orange-500 hover:bg-orange-600 text-white rounded-full font-semibold"><Plus className="w-4 h-4 mr-1" /> Add Student</Button>
+          </div>
+        </div>
+
+        {stats.todaysFollowups > 0 && ['super_admin', 'counselor'].includes(user.role) && (
+          <div className="relative z-10 mt-6 p-4 rounded-2xl bg-white/10 backdrop-blur-md border border-white/20 flex items-center justify-between flex-wrap gap-3">
+            <div className="flex items-center gap-3"><div className="w-11 h-11 rounded-xl bg-orange-500 flex items-center justify-center"><Zap className="w-5 h-5" /></div><div><div className="text-xs opacity-80">Action Required</div><div className="font-bold text-lg">{stats.todaysFollowups} follow-ups pending today</div></div></div>
+            <Button onClick={() => goTo('admissions')} size="sm" className="bg-white text-orange-600 hover:bg-orange-50 rounded-full">Start Now →</Button>
+          </div>
+        )}
       </div>
 
-      {stats.todaysFollowups > 0 && ['super_admin', 'counselor'].includes(user.role) && (
-        <Card className="rounded-2xl border-0 bg-gradient-to-r from-orange-500 to-red-500 text-white shadow-lg">
-          <CardContent className="p-5 flex items-center justify-between flex-wrap gap-3">
-            <div className="flex items-center gap-4"><Zap className="w-10 h-10 opacity-80" /><div><div className="text-sm font-medium opacity-90">Good morning ☀️ You have</div><div className="text-2xl font-bold">{stats.todaysFollowups} follow-ups scheduled for today</div></div></div>
-            <Button onClick={() => goTo('admissions')} className="bg-white text-orange-600 hover:bg-orange-50 rounded-full font-semibold">Start Follow-ups →</Button>
-          </CardContent>
-        </Card>
-      )}
-
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        {[
-          { label: 'Total Students', value: stats.totalStudents, icon: GraduationCap, bg: 'bg-orange-100', text: 'text-orange-700' },
-          { label: 'Active Leads', value: stats.totalLeads, icon: UserPlus, bg: 'bg-amber-100', text: 'text-amber-700' },
-          { label: 'Revenue Collected', value: formatINR(stats.totalRevenue), icon: TrendingUp, bg: 'bg-emerald-100', text: 'text-emerald-700' },
-          { label: 'Pending Fees', value: formatINR(stats.pendingRevenue), icon: Wallet, bg: 'bg-red-100', text: 'text-red-700' },
-        ].map(c => (
-          <Card key={c.label} className="rounded-2xl border-0 shadow-sm"><CardContent className="p-5">
-            <div className={`w-10 h-10 rounded-xl ${c.bg} ${c.text} flex items-center justify-center`}><c.icon className="w-5 h-5" /></div>
-            <div className="mt-3 text-2xl font-bold">{c.value}</div><div className="text-sm text-slate-500">{c.label}</div>
-          </CardContent></Card>
+      {/* KPI Cards with SparkLines */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        {kpis.map(c => (
+          <Card key={c.label} className="rounded-2xl border-0 shadow-sm hover:shadow-xl transition-all duration-300 hover:-translate-y-1 overflow-hidden group">
+            <CardContent className="p-5 relative">
+              <div className={`absolute -right-4 -top-4 w-24 h-24 rounded-full bg-gradient-to-br ${c.gradient} opacity-10 group-hover:opacity-20 transition`} />
+              <div className="relative flex items-start justify-between">
+                <div className={`w-11 h-11 rounded-2xl bg-gradient-to-br ${c.gradient} text-white flex items-center justify-center shadow-lg`}><c.icon className="w-5 h-5" /></div>
+                <Badge className={`${c.up ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'} border-0 font-bold`}><ArrowUpRight className={`w-3 h-3 mr-0.5 ${!c.up && 'rotate-90'}`} />{c.change}</Badge>
+              </div>
+              <div className="mt-3 text-2xl md:text-3xl font-black">{c.value}</div>
+              <div className="flex items-center justify-between mt-1"><div className="text-xs text-slate-500 font-medium">{c.label}</div><SparkLine data={c.spark} color={c.color} /></div>
+            </CardContent>
+          </Card>
         ))}
       </div>
 
-      <div className="grid lg:grid-cols-3 gap-6">
-        <Card className="rounded-2xl border-0 shadow-sm lg:col-span-2">
-          <CardHeader className="flex-row items-center justify-between space-y-0"><div><CardTitle>Hours Activity</CardTitle><CardDescription>Weekly engagement</CardDescription></div><Badge variant="outline" className="rounded-full">Weekly</Badge></CardHeader>
+      {/* Row: Weekly Activity + Revenue Donut + Calendar */}
+      <div className="grid lg:grid-cols-6 gap-6">
+        <Card className="rounded-2xl border-0 shadow-sm lg:col-span-3">
+          <CardHeader className="flex-row items-center justify-between space-y-0">
+            <div><CardTitle className="flex items-center gap-2"><Flame className="w-5 h-5 text-orange-500" /> Activity Heatmap</CardTitle><CardDescription>Weekly engagement pattern</CardDescription></div>
+            <div className="flex bg-slate-100 rounded-full p-0.5">{['week','month'].map(t => <button key={t} onClick={() => setTimeRange(t)} className={`px-3 py-1 rounded-full text-xs font-medium capitalize ${timeRange === t ? 'bg-white text-slate-900 shadow' : 'text-slate-500'}`}>{t}</button>)}</div>
+          </CardHeader>
           <CardContent>
-            <div className="flex justify-between gap-3 px-2 h-56">
+            <div className="flex justify-between gap-2 px-2 h-56">
               {(stats.weekly || []).map((w, i) => { const h = Math.round((w.hours / maxH) * 100); const isHi = w.hours === maxH; return (
-                <div key={i} className="flex-1 flex flex-col items-center gap-2 h-full">
+                <div key={i} className="flex-1 flex flex-col items-center gap-2 h-full group cursor-pointer">
                   <div className="relative w-full flex-1 flex flex-col justify-end">
-                    {isHi && <div className="absolute -top-6 left-1/2 -translate-x-1/2 bg-slate-900 text-white text-[10px] px-2 py-1 rounded whitespace-nowrap">{w.hours}h · Peak</div>}
-                    <div className={`w-full rounded-t-lg ${isHi ? 'bg-orange-500' : 'bg-slate-900'}`} style={{ height: `${Math.max(h, 8)}%`, minHeight: '20px' }} />
+                    <div className={`absolute -top-6 left-1/2 -translate-x-1/2 bg-slate-900 text-white text-[10px] px-2 py-1 rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition ${isHi ? '!opacity-100' : ''}`}>{w.hours}h {isHi && '· Peak'}</div>
+                    <div className={`w-full rounded-t-xl transition-all duration-500 group-hover:opacity-80 ${isHi ? 'bg-gradient-to-t from-red-500 to-orange-400 shadow-lg shadow-orange-500/50' : 'bg-gradient-to-t from-slate-800 to-slate-700'}`} style={{ height: `${Math.max(h, 8)}%`, minHeight: '20px' }} />
                   </div>
-                  <span className="text-xs text-slate-500">{w.day}</span>
+                  <span className={`text-xs font-medium ${isHi ? 'text-orange-600' : 'text-slate-500'}`}>{w.day}</span>
                 </div>
               );})}
             </div>
           </CardContent>
         </Card>
+
+        <Card className="rounded-2xl border-0 shadow-sm lg:col-span-2 bg-gradient-to-br from-white to-orange-50">
+          <CardHeader><CardTitle className="text-base flex items-center gap-2"><IndianRupee className="w-4 h-4 text-orange-500" /> Revenue Ring</CardTitle><CardDescription>Collection vs pending</CardDescription></CardHeader>
+          <CardContent className="flex flex-col items-center">
+            <DonutChart collected={stats.totalRevenue} pending={stats.pendingRevenue} total={totalFeesTarget} />
+            <div className="grid grid-cols-2 gap-2 w-full mt-4 text-xs">
+              <div className="p-2 rounded-xl bg-white border"><div className="flex items-center gap-1 text-emerald-600 font-semibold"><span className="w-2 h-2 rounded-full bg-emerald-500" />Collected</div><div className="font-bold mt-0.5">{formatINR(stats.totalRevenue)}</div></div>
+              <div className="p-2 rounded-xl bg-white border"><div className="flex items-center gap-1 text-rose-600 font-semibold"><span className="w-2 h-2 rounded-full bg-rose-500" />Pending</div><div className="font-bold mt-0.5">{formatINR(stats.pendingRevenue)}</div></div>
+            </div>
+          </CardContent>
+        </Card>
+
         <Card className="rounded-2xl border-0 shadow-sm">
-          <CardHeader className="flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-base">{monthName}</CardTitle><CalendarDays className="w-4 h-4 text-slate-400" /></CardHeader>
+          <CardHeader className="flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-base">{monthName}</CardTitle><CalendarDays className="w-4 h-4 text-orange-500" /></CardHeader>
           <CardContent>
-            <div className="grid grid-cols-7 gap-1 text-center text-[10px] text-slate-400 mb-2">{['S','M','T','W','T','F','S'].map((d, i) => <div key={i}>{d}</div>)}</div>
+            <div className="grid grid-cols-7 gap-1 text-center text-[10px] text-slate-400 mb-2 font-semibold">{['S','M','T','W','T','F','S'].map((d, i) => <div key={i}>{d}</div>)}</div>
             <div className="grid grid-cols-7 gap-1 text-center text-xs">
               {Array.from({length: firstDay}).map((_, i) => <div key={'e'+i} />)}
-              {Array.from({length: daysInMonth}).map((_, i) => { const d = i + 1; const isToday = d === today.getDate(); return <div key={d} className={`aspect-square flex items-center justify-center rounded-full ${isToday ? 'bg-orange-500 text-white font-bold' : 'hover:bg-slate-100'}`}>{d}</div>; })}
+              {Array.from({length: daysInMonth}).map((_, i) => { const d = i + 1; const isToday = d === today.getDate(); return <div key={d} className={`aspect-square flex items-center justify-center rounded-full transition ${isToday ? 'bg-gradient-to-br from-orange-500 to-red-500 text-white font-bold shadow-lg scale-110' : 'hover:bg-orange-50 text-slate-600'}`}>{d}</div>; })}
             </div>
           </CardContent>
         </Card>
       </div>
 
+      {/* Row: Interactive Funnel + Activity Timeline */}
       <div className="grid lg:grid-cols-3 gap-6">
-        <Card className="rounded-2xl border-0 shadow-sm lg:col-span-2">
-          <CardHeader className="flex-row items-center justify-between space-y-0"><div><CardTitle>Admission Pipeline</CardTitle><CardDescription>{stats.conversionRate}% conversion rate</CardDescription></div><Button variant="ghost" size="sm" onClick={() => goTo('admissions')} className="text-xs">View All <ChevronRight className="w-3 h-3" /></Button></CardHeader>
-          <CardContent className="space-y-3">
-            {STAGES.map(s => { const count = stats.pipelineCount[s.key] || 0; const pct = stats.totalLeads > 0 ? Math.round((count / stats.totalLeads) * 100) : 0; return (
-              <div key={s.key}><div className="flex items-center justify-between text-sm mb-1"><div className="flex items-center gap-2"><div className={`w-2 h-2 rounded-full ${s.dot}`} /><span className="font-medium">{s.label}</span></div><span className="text-slate-500 text-xs">{count} leads · {pct}%</span></div><Progress value={pct} className="h-1.5" /></div>
+        <Card className="rounded-2xl border-0 shadow-sm lg:col-span-2 overflow-hidden">
+          <CardHeader className="flex-row items-center justify-between space-y-0">
+            <div><CardTitle className="flex items-center gap-2"><TrendingUp className="w-5 h-5 text-orange-500" /> Admission Funnel</CardTitle><CardDescription><span className="text-2xl font-black bg-gradient-to-r from-orange-500 to-red-500 bg-clip-text text-transparent">{stats.conversionRate}%</span> conversion rate this cycle</CardDescription></div>
+            <Button variant="ghost" size="sm" onClick={() => goTo('admissions')}>View All <ChevronRight className="w-3 h-3" /></Button>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {STAGES.map((s, i) => { const count = stats.pipelineCount[s.key] || 0; const pct = stats.totalLeads > 0 ? Math.round((count / stats.totalLeads) * 100) : 0; const width = 100 - (i * 8); return (
+              <button onClick={() => goTo('admissions')} key={s.key} className="w-full group text-left">
+                <div className="flex items-center gap-3">
+                  <div className={`w-3 h-3 rounded-full ${s.dot} shadow-lg`} />
+                  <div className="flex-1 relative">
+                    <div className="h-9 rounded-lg relative overflow-hidden" style={{ width: `${Math.max(width, 30)}%` }}>
+                      <div className={`absolute inset-0 ${s.dot} opacity-20`} />
+                      <div className={`absolute inset-y-0 left-0 ${s.dot} transition-all duration-700 group-hover:opacity-100`} style={{ width: `${Math.max(pct, 5)}%` }} />
+                      <div className="relative flex items-center justify-between px-3 h-full text-xs">
+                        <span className="font-bold text-slate-900">{s.label}</span>
+                        <span className="font-black text-slate-900">{count}</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="text-xs text-slate-500 font-medium w-12 text-right">{pct}%</div>
+                </div>
+              </button>
             );})}
           </CardContent>
         </Card>
+
         <Card className="rounded-2xl border-0 shadow-sm">
-          <CardHeader className="flex-row items-center justify-between space-y-0"><CardTitle className="text-base">Recent Students</CardTitle><Button variant="ghost" size="sm" onClick={() => goTo('students')} className="text-xs">All</Button></CardHeader>
+          <CardHeader className="flex-row items-center justify-between space-y-0"><CardTitle className="text-base flex items-center gap-2"><Bell className="w-4 h-4 text-orange-500" /> Live Activity</CardTitle><Badge className="bg-emerald-100 text-emerald-700 border-0 text-[10px]"><span className="w-1.5 h-1.5 rounded-full bg-emerald-500 mr-1 animate-pulse" /> Live</Badge></CardHeader>
           <CardContent className="space-y-3">
-            {stats.recentStudents?.map(s => (
-              <div key={s.id} className="flex items-center gap-3"><Avatar className="w-9 h-9"><AvatarFallback className="bg-orange-500 text-white text-xs font-bold">{initials(s.name)}</AvatarFallback></Avatar><div className="flex-1 min-w-0"><div className="font-medium text-sm truncate">{s.name}</div><div className="text-xs text-slate-500 truncate">{s.course}</div></div>{s.batch && <Badge variant="secondary" className="text-[10px]">{s.batch}</Badge>}</div>
+            {activities.map((a, i) => (
+              <div key={i} className="flex gap-3 group">
+                <div className="relative">
+                  <div className={`w-8 h-8 rounded-full ${a.color} text-white flex items-center justify-center shadow-md`}><a.icon className="w-3.5 h-3.5" /></div>
+                  {i < activities.length - 1 && <div className="absolute top-8 left-1/2 -translate-x-1/2 w-0.5 h-6 bg-slate-200" />}
+                </div>
+                <div className="flex-1 pb-4"><div className="text-sm font-medium">{a.text}</div><div className="text-[11px] text-slate-500 mt-0.5">{a.time}</div></div>
+              </div>
             ))}
-            {!stats.recentStudents?.length && <div className="text-sm text-slate-400 text-center py-4">No students yet</div>}
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Row: Quick Actions + Recent Students + Course Performance */}
+      <div className="grid lg:grid-cols-3 gap-6">
+        <Card className="rounded-2xl border-0 shadow-sm bg-gradient-to-br from-slate-900 to-slate-800 text-white overflow-hidden relative">
+          <div className="absolute -bottom-16 -right-16 w-48 h-48 rounded-full bg-orange-500/20 blur-3xl" />
+          <CardHeader><CardTitle className="text-base text-white flex items-center gap-2"><Zap className="w-4 h-4 text-orange-400" /> Quick Actions</CardTitle></CardHeader>
+          <CardContent className="grid grid-cols-2 gap-2 relative z-10">
+            {[
+              { label: 'New Lead', icon: UserPlus, go: 'admissions' },
+              { label: 'New Student', icon: GraduationCap, go: 'students' },
+              { label: 'Collect Fees', icon: IndianRupee, go: 'fees' },
+              { label: 'New Batch', icon: BookOpen, go: 'batches' },
+              { label: 'Add Course', icon: Library, go: 'courses' },
+              { label: 'LMS', icon: PlayCircle, go: 'lms' },
+            ].map(a => (
+              <button key={a.label} onClick={() => goTo(a.go)} className="p-3 rounded-xl bg-white/10 hover:bg-orange-500 border border-white/10 hover:border-orange-500 transition text-left group">
+                <a.icon className="w-4 h-4 mb-2 text-orange-400 group-hover:text-white" />
+                <div className="text-xs font-semibold">{a.label}</div>
+              </button>
+            ))}
+          </CardContent>
+        </Card>
+
+        <Card className="rounded-2xl border-0 shadow-sm">
+          <CardHeader className="flex-row items-center justify-between space-y-0"><CardTitle className="text-base flex items-center gap-2"><GraduationCap className="w-4 h-4 text-orange-500" /> Recent Students</CardTitle><Button variant="ghost" size="sm" onClick={() => goTo('students')} className="text-xs">All →</Button></CardHeader>
+          <CardContent className="space-y-3">
+            {stats.recentStudents?.length ? stats.recentStudents.map((s, i) => (
+              <div key={s.id} className="flex items-center gap-3 p-2 rounded-xl hover:bg-orange-50 transition cursor-pointer" onClick={() => goTo('students')}>
+                <div className="relative">
+                  <Avatar className="w-10 h-10"><AvatarFallback className="bg-gradient-to-br from-orange-400 to-red-500 text-white text-xs font-bold">{initials(s.name)}</AvatarFallback></Avatar>
+                  {i === 0 && <div className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-emerald-500 border-2 border-white flex items-center justify-center"><span className="text-[8px] text-white font-bold">✓</span></div>}
+                </div>
+                <div className="flex-1 min-w-0"><div className="font-semibold text-sm truncate">{s.name}</div><div className="text-xs text-slate-500 truncate">{s.course}</div></div>
+                {s.batch && <Badge variant="secondary" className="text-[10px]">{s.batch}</Badge>}
+              </div>
+            )) : <div className="text-center py-8"><GraduationCap className="w-10 h-10 mx-auto text-slate-300 mb-2" /><div className="text-sm text-slate-400">No students enrolled yet</div><Button size="sm" onClick={() => goTo('students')} className="mt-3 bg-orange-500 hover:bg-orange-600 text-white">Add First Student</Button></div>}
+          </CardContent>
+        </Card>
+
+        <Card className="rounded-2xl border-0 shadow-sm">
+          <CardHeader><CardTitle className="text-base flex items-center gap-2"><Trophy className="w-4 h-4 text-amber-500" /> Institute Score</CardTitle><CardDescription>Overall performance</CardDescription></CardHeader>
+          <CardContent>
+            <div className="text-center py-2">
+              <div className="text-5xl font-black bg-gradient-to-r from-orange-500 via-red-500 to-pink-500 bg-clip-text text-transparent">{Math.min(95, 40 + stats.totalStudents * 2 + stats.conversionRate)}</div>
+              <div className="text-xs text-slate-500 uppercase tracking-widest mt-1">Growth Index</div>
+            </div>
+            <div className="space-y-2 mt-2">
+              {[
+                { label: 'Students Growth', val: Math.min(100, stats.totalStudents * 8), color: 'bg-orange-500' },
+                { label: 'Revenue Health', val: totalFeesTarget > 0 ? Math.round((stats.totalRevenue / totalFeesTarget) * 100) : 0, color: 'bg-emerald-500' },
+                { label: 'Lead Conversion', val: stats.conversionRate, color: 'bg-blue-500' },
+                { label: 'Engagement', val: 78, color: 'bg-violet-500' },
+              ].map(m => (
+                <div key={m.label}><div className="flex justify-between text-[11px] mb-1"><span className="text-slate-600 font-medium">{m.label}</span><span className="font-bold">{m.val}%</span></div><div className="h-1.5 rounded-full bg-slate-100 overflow-hidden"><div className={`h-full ${m.color} rounded-full transition-all duration-1000`} style={{ width: `${m.val}%` }} /></div></div>
+              ))}
+            </div>
           </CardContent>
         </Card>
       </div>
