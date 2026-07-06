@@ -1107,6 +1107,7 @@ function ExpensesPanel({ currentUser }) {
   const [editing, setEditing] = useState(null);
   const [search, setSearch] = useState('');
   const [filterCat, setFilterCat] = useState('all');
+  const [activeMonth, setActiveMonth] = useState('all'); // 'all' | 'YYYY-MM' | '__ALL__'
   const empty = { category: 'Rent', amount: '', description: '', date: new Date().toISOString().slice(0, 10), paidTo: '', paymentMode: 'cash' };
   const [form, setForm] = useState(empty);
 
@@ -1141,7 +1142,20 @@ function ExpensesPanel({ currentUser }) {
     try { await api(`/expenses/${e.id}`, { method: 'DELETE' }); notify('Expense deleted'); load(); } catch (err) { toast.error(err.message); }
   };
 
+  // Group expenses by month (YYYY-MM)
+  const monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+  const formatMonth = (key) => { const [y, m] = key.split('-'); return `${monthNames[Number(m) - 1]} ${y}`; };
+  const getMonthKey = (e) => (e.date || e.createdAt || new Date().toISOString()).slice(0, 7);
+  const monthGroups = {};
+  for (const e of expenses) { const mk = getMonthKey(e); if (!monthGroups[mk]) monthGroups[mk] = []; monthGroups[mk].push(e); }
+  const months = Object.entries(monthGroups).map(([key, es]) => ({
+    key, label: formatMonth(key), count: es.length,
+    total: es.reduce((a, x) => a + (Number(x.amount) || 0), 0),
+    topCat: (() => { const g = {}; for (const x of es) g[x.category] = (g[x.category] || 0) + (Number(x.amount) || 0); const t = Object.entries(g).sort((a,b)=>b[1]-a[1])[0]; return t ? t[0] : '—'; })(),
+  })).sort((a, b) => b.key.localeCompare(a.key));
+
   const filtered = expenses.filter(e => {
+    if (activeMonth !== 'all' && activeMonth !== '__ALL__' && getMonthKey(e) !== activeMonth) return false;
     if (filterCat !== 'all' && e.category !== filterCat) return false;
     if (!search) return true;
     return (e.description || '').toLowerCase().includes(search.toLowerCase()) || (e.paidTo || '').toLowerCase().includes(search.toLowerCase()) || e.category.toLowerCase().includes(search.toLowerCase());
@@ -1161,6 +1175,19 @@ function ExpensesPanel({ currentUser }) {
 
   return (
     <div className="space-y-6">
+      {/* Header + Back Button */}
+      {activeMonth !== 'all' && (
+        <div className="flex items-center justify-between flex-wrap gap-3">
+          <div>
+            <Button variant="ghost" size="sm" onClick={() => setActiveMonth('all')} className="mb-1 -ml-2"><ArrowLeft className="w-4 h-4 mr-1" /> Back to Monthly Folders</Button>
+            <h2 className="text-2xl font-bold flex items-center gap-2">
+              {activeMonth === '__ALL__' ? <><List className="w-6 h-6 text-orange-500" /> All Expenses</> : <><FolderOpen className="w-6 h-6 text-orange-500" /> {formatMonth(activeMonth)} · Expenses</>}
+            </h2>
+            <p className="text-slate-500 text-sm">{filtered.length} entries · {formatINR(filtered.reduce((a, x) => a + (Number(x.amount) || 0), 0))} total</p>
+          </div>
+        </div>
+      )}
+
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {kpis.map(c => (
           <Card key={c.label} className={`rounded-2xl border-0 border-l-4 ${c.border} shadow-sm`}>
@@ -1173,9 +1200,64 @@ function ExpensesPanel({ currentUser }) {
         ))}
       </div>
 
-      {catEntries.length > 0 && (
+      {/* Monthly Folders View (default) */}
+      {activeMonth === 'all' && (
+        <div>
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="font-bold text-lg flex items-center gap-2"><CalendarDays className="w-5 h-5 text-orange-500" /> Monthly Expense Folders</h3>
+            <Badge className="bg-slate-900 text-white border-0">{months.length} months</Badge>
+          </div>
+          <div className="grid md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+            {/* All Expenses master tile */}
+            <button onClick={() => setActiveMonth('__ALL__')} className="text-left group">
+              <Card className="rounded-2xl border-0 shadow-sm hover:shadow-xl transition group-hover:-translate-y-1 overflow-hidden bg-gradient-to-br from-slate-900 to-slate-700 text-white">
+                <div className="h-24 relative">
+                  <List className="absolute right-4 bottom-4 w-16 h-16 text-white/20" />
+                  <div className="absolute top-4 left-4 text-white/80 text-xs font-semibold uppercase tracking-wider">All Expenses · Everything</div>
+                </div>
+                <CardContent className="p-4">
+                  <div className="font-bold text-lg">Show All Expenses</div>
+                  <div className="grid grid-cols-2 gap-2 mt-3 text-sm">
+                    <div><div className="text-xs text-white/60">Entries</div><div className="font-bold text-white">{expenses.length}</div></div>
+                    <div><div className="text-xs text-white/60">Total</div><div className="font-bold text-rose-300">{formatINR(stats.totalExpenses)}</div></div>
+                  </div>
+                </CardContent>
+              </Card>
+            </button>
+
+            {months.map(m => (
+              <button key={m.key} onClick={() => setActiveMonth(m.key)} className="text-left group">
+                <Card className="rounded-2xl border-0 shadow-sm hover:shadow-xl transition group-hover:-translate-y-1 overflow-hidden">
+                  <div className="h-24 bg-gradient-to-br from-red-400 via-orange-500 to-amber-500 relative">
+                    <Folder className="absolute right-4 bottom-4 w-16 h-16 text-white/20" />
+                    <div className="absolute top-4 left-4 text-white/90 text-xs font-semibold uppercase tracking-wider">{m.key}</div>
+                  </div>
+                  <CardContent className="p-4">
+                    <div className="font-bold text-lg">{m.label}</div>
+                    <div className="grid grid-cols-3 gap-2 mt-3 text-sm">
+                      <div><div className="text-xs text-slate-500">Entries</div><div className="font-bold">{m.count}</div></div>
+                      <div><div className="text-xs text-slate-500">Total</div><div className="font-bold text-red-600">{formatINR(m.total)}</div></div>
+                      <div><div className="text-xs text-slate-500">Top Cat</div><div className="font-bold text-orange-600 truncate text-xs">{m.topCat}</div></div>
+                    </div>
+                  </CardContent>
+                </Card>
+              </button>
+            ))}
+
+            {!months.length && (
+              <div className="col-span-4 py-10 text-center text-slate-400">
+                <TrendingDown className="w-12 h-12 mx-auto mb-2 opacity-30" />
+                <div>No expenses recorded yet. Click below to add your first expense.</div>
+                <Button onClick={openAdd} className="mt-4 rounded-full bg-orange-500 hover:bg-orange-600 text-white"><Plus className="w-4 h-4 mr-1" /> New Expense</Button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {activeMonth !== 'all' && catEntries.length > 0 && (
         <Card className="rounded-2xl border-0 shadow-sm">
-          <CardHeader className="pb-3"><CardTitle className="text-base flex items-center gap-2"><Tag className="w-4 h-4 text-orange-500" /> Category Breakdown</CardTitle><CardDescription>Where the money is going</CardDescription></CardHeader>
+          <CardHeader className="pb-3"><CardTitle className="text-base flex items-center gap-2"><Tag className="w-4 h-4 text-orange-500" /> Category Breakdown (All Time)</CardTitle><CardDescription>Where the money is going</CardDescription></CardHeader>
           <CardContent className="space-y-3">
             {catEntries.map(([cat, amt]) => (
               <div key={cat}>
@@ -1192,6 +1274,7 @@ function ExpensesPanel({ currentUser }) {
         </Card>
       )}
 
+      {activeMonth !== 'all' && (
       <Card className="rounded-2xl border-0 shadow-sm">
         <CardHeader className="flex-row items-center justify-between space-y-0 flex-wrap gap-3">
           <div><CardTitle className="flex items-center gap-2"><Building2 className="w-5 h-5 text-orange-500" /> Expense Ledger</CardTitle><CardDescription>All recorded institute expenses</CardDescription></div>
@@ -1216,11 +1299,12 @@ function ExpensesPanel({ currentUser }) {
                   <TableCell><div className="flex gap-1"><Button size="icon" variant="ghost" onClick={() => openEdit(e)}><Edit3 className="w-4 h-4" /></Button><Button size="icon" variant="ghost" onClick={() => del(e)}><Trash2 className="w-4 h-4 text-red-500" /></Button></div></TableCell>
                 </TableRow>
               ))}
-              {!filtered.length && (<TableRow><TableCell colSpan={7} className="text-center py-10 text-slate-400"><TrendingDown className="w-10 h-10 mx-auto opacity-40 mb-2" />No expenses recorded yet. Click "New Expense" to add one.</TableCell></TableRow>)}
+              {!filtered.length && (<TableRow><TableCell colSpan={7} className="text-center py-10 text-slate-400"><TrendingDown className="w-10 h-10 mx-auto opacity-40 mb-2" />No expenses in this view.</TableCell></TableRow>)}
             </TableBody>
           </Table>
         </CardContent>
       </Card>
+      )}
 
       <Dialog open={addOpen} onOpenChange={setAddOpen}>
         <DialogContent className="max-w-xl max-h-[92vh] overflow-y-auto">
