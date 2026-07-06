@@ -26,7 +26,7 @@ async function currentUser(request) {
 }
 
 function buildInstallments(total, count, startDate = '2025-06-15') {
-  const n = Math.max(1, Math.min(6, Number(count) || 1));
+  const n = Math.max(1, Math.min(24, Number(count) || 1));
   if (n === 1) return [{ amount: total, dueDate: startDate, paid: false, paidDate: null, label: 'Full Payment' }];
   const per = Math.floor(total / n);
   const last = total - per * (n - 1);
@@ -304,6 +304,27 @@ export async function GET(request, { params }) {
       return ok({ messages: msgs });
     }
 
+    // CERTIFICATES - list eligible students (fees paid + enrolled)
+    if (route === 'certificates/eligible') {
+      const students = await db.collection('users').find({ role: 'student' }, { projection: { _id: 0, password: 0, plainPassword: 0 } }).toArray();
+      const results = [];
+      for (const s of students) {
+        const fee = await db.collection('fees').findOne({ studentId: s.id });
+        const feesCleared = !fee || fee.status === 'paid';
+        results.push({ ...s, feesCleared, feeStatus: fee?.status || 'no_fee', eligible: feesCleared });
+      }
+      return ok({ students: results });
+    }
+
+    if (p[0] === 'certificates' && p[1]) {
+      const student = await db.collection('users').findOne({ id: p[1], role: 'student' }, { projection: { _id: 0, password: 0, plainPassword: 0 } });
+      if (!student) return err('Student not found', 404);
+      const certNo = 'ZTS-CERT-' + student.id.slice(0, 8).toUpperCase();
+      const issueDate = new Date().toISOString().slice(0, 10);
+      const verifyUrl = `${process.env.NEXT_PUBLIC_BASE_URL || ''}/verify/${certNo}`;
+      return ok({ certificate: { certNo, studentName: student.name, course: student.course, batch: student.batchName, mentor: student.mentorName, issueDate, verifyUrl, student } });
+    }
+
     return err('Not found', 404);
   } catch (e) {
     console.error('GET error', e);
@@ -443,16 +464,22 @@ export async function POST(request, { params }) {
 
     if (route === 'fees') {
       const body = await request.json();
-      const { studentId, totalAmount, installmentCount = 3 } = body;
+      const { studentId, totalAmount, installmentCount = 3, customInstallments } = body;
       const student = await db.collection('users').findOne({ id: studentId });
       if (!student) return err('Student not found');
-      const insts = buildInstallments(Number(totalAmount), installmentCount);
+      let insts;
+      if (Array.isArray(customInstallments) && customInstallments.length) {
+        insts = customInstallments.map((ci, i) => ({ amount: Number(ci.amount) || 0, dueDate: ci.dueDate, label: ci.label || `Installment ${i+1}`, paid: false, paidDate: null }));
+      } else {
+        insts = buildInstallments(Number(totalAmount), installmentCount);
+      }
+      const actualTotal = insts.reduce((a, i) => a + i.amount, 0);
       const fee = {
         id: uuidv4(), studentId, studentName: student.name, studentEmail: student.email,
         course: student.course, batchId: student.batchId, batchName: student.batchName,
-        totalAmount: Number(totalAmount), paidAmount: 0, pendingAmount: Number(totalAmount),
-        planType: installmentCount == 1 ? 'full' : 'installment',
-        installmentCount: Number(installmentCount),
+        totalAmount: actualTotal, paidAmount: 0, pendingAmount: actualTotal,
+        planType: insts.length === 1 ? 'full' : 'installment',
+        installmentCount: insts.length,
         status: 'pending', dueDate: insts[insts.length - 1].dueDate,
         installments: insts, createdAt: new Date().toISOString(),
       };
@@ -593,6 +620,53 @@ export async function POST(request, { params }) {
       return ok({ message: safe });
     }
 
+    // AI DOUBT SOLVER (Emergent LLM)
+    if (route === 'ai/doubt') {
+      const me = await currentUser(request); if (!me) return err('Unauthorized', 401);
+      const { message, history = [], context = '' } = await request.json();
+      if (!message) return err('Message required');
+
+      const systemPrompt = `You are the Zero to Skill AI Mentor — a friendly, expert instructor at Zero to Skill Institute. You help students learn Digital Marketing With AI and Graphics Design With AI.
+
+Your specialties:
+- Digital Marketing (SEO, Social Media, Google Ads, Meta Ads, Analytics, Email Marketing)
+- Graphics Design (Photoshop, Illustrator, Figma, Canva, AI tools like Midjourney, DALL-E)
+- AI Tools (ChatGPT, Claude, AI image gen, prompt engineering)
+- Freelancing & Career Guidance
+- Portfolio building
+
+Style:
+- Be concise, practical, encouraging
+- Use real-world examples
+- Break down complex concepts step-by-step  
+- Suggest tools and next steps
+- Use emojis sparingly for warmth
+- If off-topic, gently redirect to their coursework
+- Keep answers under 250 words unless deep-dive needed
+
+Student context: ${me.name}${me.course ? ', enrolled in ' + me.course : ''}${me.batchName ? ', batch ' + me.batchName : ''}
+${context ? 'Additional context: ' + context : ''}`;
+
+      const messages = [
+        { role: 'system', content: systemPrompt },
+        ...(history || []).slice(-10).map(h => ({ role: h.role, content: h.content })),
+        { role: 'user', content: message },
+      ];
+
+      const reply = "AI Feature Disabled";
+
+await db.collection('doubts').insertOne({
+  id: uuidv4(),
+  userId: me.id,
+  userName: me.name,
+  question: message,
+  answer: reply,
+  createdAt: new Date()
+});
+
+return ok({ reply });
+    }
+
     return err('Not found', 404);
   } catch (e) {
     console.error('POST error', e);
@@ -642,6 +716,22 @@ export async function PATCH(request, { params }) {
     }
     if (p[0] === 'fees' && p[1]) {
       const body = await request.json();
+      // Custom installments override
+      if (Array.isArray(body.customInstallments)) {
+        const fee = await db.collection('fees').findOne({ id: p[1] });
+        if (fee) {
+          const paidLabels = new Set((fee.installments || []).filter(i => i.paid).map(i => i.label));
+          const paidByLabel = {}; (fee.installments || []).forEach(i => { if (i.paid) paidByLabel[i.label] = i; });
+          const insts = body.customInstallments.map((ci, i) => {
+            const p = paidByLabel[ci.label];
+            return { amount: Number(ci.amount) || 0, dueDate: ci.dueDate, label: ci.label || `Installment ${i+1}`, paid: !!p, paidDate: p?.paidDate || null };
+          });
+          const total = insts.reduce((a, i) => a + i.amount, 0);
+          const updated = recomputeFee({ ...fee, totalAmount: total, installments: insts });
+          await db.collection('fees').updateOne({ id: p[1] }, { $set: { totalAmount: total, installmentCount: insts.length, planType: insts.length === 1 ? 'full' : 'installment', installments: updated.installments, paidAmount: updated.paidAmount, pendingAmount: updated.pendingAmount, status: updated.status } });
+          return ok({ success: true });
+        }
+      }
       if (body.totalAmount || body.installmentCount) {
         const fee = await db.collection('fees').findOne({ id: p[1] });
         if (fee) {

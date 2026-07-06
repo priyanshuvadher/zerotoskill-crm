@@ -108,9 +108,7 @@ function LoginScreen({ onLogin }) {
           <div className="absolute -bottom-16 -left-10 w-72 h-72 rounded-full bg-black/20 blur-3xl" />
           <div className="relative z-10"><div className="bg-white rounded-2xl p-3 inline-block shadow-lg"><Image src="/logo.png" alt="Zero to Skill" width={140} height={80} className="h-16 w-auto" /></div></div>
           <div className="relative z-10 text-white">
-            <div className="text-white/80 text-sm mb-2 font-medium">You can easily</div>
-            <div className="text-4xl font-bold leading-tight">Get your students from Zero to Skill.</div>
-            <div className="mt-6 flex items-center gap-2 text-white/90 text-sm"><Sparkles className="w-4 h-4" /> Premium EdTech CRM Platform</div>
+            <div className="text-4xl md:text-5xl font-black leading-tight">We Don't Just Teach.<br/><span className="bg-gradient-to-r from-white to-orange-200 bg-clip-text text-transparent">We Transform.</span></div>
           </div>
         </div>
         <div className="p-10 md:p-12 flex flex-col justify-center">
@@ -123,7 +121,6 @@ function LoginScreen({ onLogin }) {
               <div className="relative"><Input type={showPw ? 'text' : 'password'} value={password} onChange={e => setPassword(e.target.value)} required className="h-12 rounded-xl pr-12" /><button type="button" onClick={() => setShowPw(v => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400">{showPw ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}</button></div>
             </div>
             <Button type="submit" disabled={loading} className="w-full h-12 bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 text-white rounded-xl text-base font-semibold shadow-lg shadow-orange-500/30">{loading ? 'Signing in...' : 'Get Started →'}</Button>
-            <div className="text-xs text-center text-slate-400 pt-2">Default: <span className="font-mono">admin@zerotoskill.com</span> / <span className="font-mono">admin@123</span></div>
           </form>
         </div>
       </div>
@@ -134,11 +131,11 @@ function LoginScreen({ onLogin }) {
 // ---------------- SIDEBAR ----------------
 function Sidebar({ user, active, setActive, onLogout, open, setOpen, collapsed, setCollapsed }) {
   const roleItems = {
-    super_admin: ['dashboard', 'admissions', 'students', 'fees', 'faculty', 'batches', 'courses', 'lms', 'assignments', 'users', 'community', 'settings'],
-    academic_manager: ['dashboard', 'students', 'batches', 'faculty', 'courses', 'lms', 'assignments', 'community', 'settings'],
-    faculty: ['dashboard', 'students', 'batches', 'lms', 'assignments', 'community', 'settings'],
+    super_admin: ['dashboard', 'admissions', 'students', 'fees', 'faculty', 'batches', 'courses', 'lms', 'assignments', 'certificates', 'ai_doubts', 'users', 'community', 'settings'],
+    academic_manager: ['dashboard', 'students', 'batches', 'faculty', 'courses', 'lms', 'assignments', 'certificates', 'ai_doubts', 'community', 'settings'],
+    faculty: ['dashboard', 'students', 'batches', 'lms', 'assignments', 'ai_doubts', 'community', 'settings'],
     counselor: ['dashboard', 'admissions', 'students', 'fees', 'community', 'settings'],
-    student: ['dashboard', 'fees', 'lms', 'assignments', 'community', 'settings'],
+    student: ['dashboard', 'fees', 'lms', 'assignments', 'certificates', 'ai_doubts', 'community', 'settings'],
   };
   const items = [
     { key: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -150,6 +147,8 @@ function Sidebar({ user, active, setActive, onLogout, open, setOpen, collapsed, 
     { key: 'courses', label: 'Courses', icon: Library },
     { key: 'lms', label: 'LMS', icon: PlayCircle },
     { key: 'assignments', label: 'Assignments', icon: ClipboardList },
+    { key: 'certificates', label: 'Certificates', icon: Award },
+    { key: 'ai_doubts', label: 'AI Doubt Solver', icon: Sparkles },
     { key: 'users', label: 'User Management', icon: UserCog },
     { key: 'community', label: 'Community', icon: MessageSquare },
     { key: 'settings', label: 'Settings', icon: Settings },
@@ -854,9 +853,9 @@ function Fees({ currentUser }) {
   const [openBatchId, setOpenBatchId] = useState(null);
   const [detail, setDetail] = useState(null);
   const [addOpen, setAddOpen] = useState(false);
-  const [addForm, setAddForm] = useState({ studentId: '', totalAmount: 45000, installmentCount: 3 });
+  const [addForm, setAddForm] = useState({ studentId: '', totalAmount: 45000, installmentCount: 3, customInstallments: [], useCustom: false });
   const [editOpen, setEditOpen] = useState(false);
-  const [editForm, setEditForm] = useState({ totalAmount: 0, installmentCount: 3 });
+  const [editForm, setEditForm] = useState({ totalAmount: 0, installmentCount: 3, customInstallments: [], useCustom: false });
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [receipt, setReceipt] = useState(null);
@@ -876,8 +875,19 @@ function Fees({ currentUser }) {
     } catch (e) { toast.error(e.message); }
   };
 
-  const addFee = async () => { if (!addForm.studentId) return toast.error('Select a student'); try { await api('/fees', { method: 'POST', body: JSON.stringify(addForm) }); notify('Fee created'); setAddOpen(false); load(); } catch (e) { toast.error(e.message); } };
-  const saveEdit = async () => { try { await api(`/fees/${detail.id}`, { method: 'PATCH', body: JSON.stringify(editForm) }); notify('Fee updated'); setEditOpen(false); load(); setDetail(null); } catch (e) { toast.error(e.message); } };
+  const addFee = async () => {
+    if (!addForm.studentId) return toast.error('Select a student');
+    const body = { studentId: addForm.studentId };
+    if (addForm.useCustom && addForm.customInstallments?.length) body.customInstallments = addForm.customInstallments;
+    else { body.totalAmount = addForm.totalAmount; body.installmentCount = addForm.installmentCount; }
+    try { await api('/fees', { method: 'POST', body: JSON.stringify(body) }); notify('Fee created'); setAddOpen(false); load(); } catch (e) { toast.error(e.message); }
+  };
+  const saveEdit = async () => {
+    const body = editForm.useCustom && editForm.customInstallments?.length
+      ? { customInstallments: editForm.customInstallments }
+      : { totalAmount: editForm.totalAmount, installmentCount: editForm.installmentCount };
+    try { await api(`/fees/${detail.id}`, { method: 'PATCH', body: JSON.stringify(body) }); notify('Fee updated'); setEditOpen(false); load(); setDetail(null); } catch (e) { toast.error(e.message); }
+  };
   const del = async (id) => { if (!confirm('Delete this fee?')) return; await api(`/fees/${id}`, { method: 'DELETE' }); notify('Fee deleted'); setDetail(null); load(); };
 
   const filtered = fees.filter(f => {
@@ -958,28 +968,24 @@ function Fees({ currentUser }) {
             <div><div className="text-xs font-bold text-slate-500 uppercase mb-2">Installments ({detail.installmentCount || detail.installments?.length})</div><div className="space-y-2">
               {detail.installments?.map((i, idx) => (<div key={idx} className="flex items-center justify-between p-3 rounded-xl border"><div><div className="font-semibold text-sm">{i.label}</div><div className="text-xs text-slate-500">Due: {i.dueDate} {i.paid && `· Paid ${i.paidDate}`}</div></div><div className="flex items-center gap-3"><div className="font-bold">{formatINR(i.amount)}</div>{i.paid ? <Badge className="bg-emerald-100 text-emerald-800 border-0">Paid</Badge> : <Button size="sm" onClick={() => payInstallment(detail, idx)} className="bg-orange-500 hover:bg-orange-600 text-white">Collect</Button>}</div></div>))}
             </div></div>
-            <DialogFooter className="flex-wrap gap-2"><Button variant="outline" onClick={() => { setEditForm({ totalAmount: detail.totalAmount, installmentCount: detail.installmentCount || detail.installments?.length || 3 }); setEditOpen(true); }}><Edit3 className="w-4 h-4 mr-1" /> Edit</Button><Button variant="outline" className="text-red-600" onClick={() => del(detail.id)}><Trash2 className="w-4 h-4 mr-1" /> Delete</Button><Button onClick={() => setDetail(null)}>Close</Button></DialogFooter>
+            <DialogFooter className="flex-wrap gap-2"><Button variant="outline" onClick={() => { setEditForm({ totalAmount: detail.totalAmount, installmentCount: detail.installmentCount || detail.installments?.length || 3, customInstallments: (detail.installments || []).map(i => ({ amount: i.amount, dueDate: i.dueDate, label: i.label })), useCustom: true }); setEditOpen(true); }}><Edit3 className="w-4 h-4 mr-1" /> Edit</Button><Button variant="outline" className="text-red-600" onClick={() => del(detail.id)}><Trash2 className="w-4 h-4 mr-1" /> Delete</Button><Button onClick={() => setDetail(null)}>Close</Button></DialogFooter>
           </>)}
         </DialogContent>
       </Dialog>
 
       <Dialog open={editOpen} onOpenChange={setEditOpen}>
-        <DialogContent><DialogHeader><DialogTitle>Edit Fee</DialogTitle></DialogHeader>
-          <div className="space-y-3">
-            <Field label="Total Amount (₹)"><Input type="number" value={editForm.totalAmount} onChange={e => setEditForm({...editForm, totalAmount: Number(e.target.value)})} /></Field>
-            <Field label="Number of Installments"><RadioGroup value={String(editForm.installmentCount)} onValueChange={v => setEditForm({...editForm, installmentCount: Number(v)})} className="flex gap-3 pt-1">{[1,2,3].map(n => <label key={n} className={`flex items-center gap-2 cursor-pointer border rounded-full px-4 py-1.5 ${editForm.installmentCount === n ? 'border-orange-500 bg-orange-50' : ''}`}><RadioGroupItem value={String(n)} /><span>{n === 1 ? 'Full' : `${n} Installments`}</span></label>)}</RadioGroup></Field>
-          </div>
+        <DialogContent className="max-w-2xl max-h-[92vh] overflow-y-auto"><DialogHeader><DialogTitle>Edit Fee & Installments</DialogTitle><DialogDescription>Customize each installment amount and due date</DialogDescription></DialogHeader>
+          <FlexibleInstallmentEditor value={editForm} onChange={setEditForm} />
           <DialogFooter><Button variant="outline" onClick={() => setEditOpen(false)}>Cancel</Button><Button onClick={saveEdit} className="bg-orange-500 hover:bg-orange-600 text-white">Save</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 
       <Dialog open={addOpen} onOpenChange={setAddOpen}>
-        <DialogContent><DialogHeader><DialogTitle>Create Fee Record</DialogTitle></DialogHeader>
+        <DialogContent className="max-w-2xl max-h-[92vh] overflow-y-auto"><DialogHeader><DialogTitle>Create Fee Record</DialogTitle></DialogHeader>
           <div className="space-y-3">
-            <Field label="Student"><Select value={addForm.studentId} onValueChange={v => { const s = students.find(x => x.id === v); setAddForm(f => ({...f, studentId: v })); }}><SelectTrigger><SelectValue placeholder="Choose student" /></SelectTrigger><SelectContent>{students.map(s => <SelectItem key={s.id} value={s.id}>{s.name} · {s.course}</SelectItem>)}</SelectContent></Select></Field>
-            <Field label="Total Amount (₹)"><Input type="number" value={addForm.totalAmount} onChange={e => setAddForm({...addForm, totalAmount: Number(e.target.value)})} /></Field>
-            <Field label="Installments"><RadioGroup value={String(addForm.installmentCount)} onValueChange={v => setAddForm({...addForm, installmentCount: Number(v)})} className="flex gap-3 pt-1">{[1,2,3].map(n => <label key={n} className={`flex items-center gap-2 cursor-pointer border rounded-full px-4 py-1.5 ${addForm.installmentCount === n ? 'border-orange-500 bg-orange-50' : ''}`}><RadioGroupItem value={String(n)} /><span>{n === 1 ? 'Full' : `${n} EMI`}</span></label>)}</RadioGroup></Field>
+            <Field label="Student" full><Select value={addForm.studentId} onValueChange={v => { setAddForm(f => ({...f, studentId: v })); }}><SelectTrigger><SelectValue placeholder="Choose student" /></SelectTrigger><SelectContent>{students.map(s => <SelectItem key={s.id} value={s.id}>{s.name} · {s.course}</SelectItem>)}</SelectContent></Select></Field>
           </div>
+          <FlexibleInstallmentEditor value={addForm} onChange={setAddForm} allowFullTotal />
           <DialogFooter><Button variant="outline" onClick={() => setAddOpen(false)}>Cancel</Button><Button onClick={addFee} className="bg-orange-500 hover:bg-orange-600 text-white">Create</Button></DialogFooter>
         </DialogContent>
       </Dialog>
