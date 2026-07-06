@@ -27,7 +27,7 @@ import {
   Receipt, Printer, HelpCircle, ThumbsUp, Flame, Award, UserCog,
   ChevronLeft, PanelLeftClose, PanelLeftOpen, Layers, Video, FileText,
   PlayCircle, ClipboardList, Upload, Zap, Percent, FolderPlus, Library,
-  TrendingDown, PiggyBank, Tag, Building2,
+  TrendingDown, PiggyBank, Tag, Building2, MapPin,
 } from 'lucide-react';
 
 const API = '/api';
@@ -710,8 +710,31 @@ function Admissions({ currentUser }) {
   const [stageFilter, setStageFilter] = useState('all');
   const [addOpen, setAddOpen] = useState(false);
   const [dragId, setDragId] = useState(null);
-  const [activeMonth, setActiveMonth] = useState('all'); // 'all' | 'YYYY-MM'
+  const [activeMonth, setActiveMonth] = useState('all'); // 'all' | 'YYYY-MM' | '__ALL__'
+  const [detailLead, setDetailLead] = useState(null); // lead detail dialog
+  const [customStages, setCustomStages] = useState(() => {
+    if (typeof window === 'undefined') return [];
+    try { return JSON.parse(localStorage.getItem('zts_custom_stages') || '[]'); } catch { return []; }
+  });
   const courses = useCourses();
+
+  const ALL_STAGES = [...STAGES, ...customStages];
+
+  const persistStages = (list) => { setCustomStages(list); localStorage.setItem('zts_custom_stages', JSON.stringify(list)); };
+  const addStage = () => {
+    const name = prompt('New Kanban column name (e.g. "Trial Booked", "Not Interested")');
+    if (!name || !name.trim()) return;
+    const key = 'custom_' + Date.now();
+    const palette = [{dot:'bg-purple-500',chip:'bg-purple-100 text-purple-700'},{dot:'bg-pink-500',chip:'bg-pink-100 text-pink-700'},{dot:'bg-cyan-500',chip:'bg-cyan-100 text-cyan-700'},{dot:'bg-fuchsia-500',chip:'bg-fuchsia-100 text-fuchsia-700'},{dot:'bg-teal-500',chip:'bg-teal-100 text-teal-700'}];
+    const c = palette[customStages.length % palette.length];
+    persistStages([...customStages, { key, label: name.trim(), ...c }]);
+    notify('Kanban column added', name.trim());
+  };
+  const removeStage = (key) => {
+    if (!confirm('Remove this custom column? Leads in it will remain but hidden until re-added.')) return;
+    persistStages(customStages.filter(s => s.key !== key));
+    notify('Column removed');
+  };
 
   const load = async () => { try { const [l, f] = await Promise.all([api('/leads'), api('/leads/today-followups')]); setLeads(l.leads); setFollowups(f.followups); } catch (e) { toast.error(e.message); } };
   useEffect(() => { load(); }, []);
@@ -818,7 +841,7 @@ function Admissions({ currentUser }) {
         </div>
       )}
 
-      {activeMonth !== 'all' && followups.length > 0 && (
+      {activeMonth !== 'all' && false && followups.length > 0 && (
         <Card className="rounded-2xl border-0 shadow-sm bg-gradient-to-r from-orange-50 to-amber-50">
           <CardHeader className="pb-3"><CardTitle className="flex items-center gap-2 text-base"><Zap className="w-5 h-5 text-orange-500" /> Today's Follow-ups · {followups.length} pending</CardTitle><CardDescription>Reach out to these leads now — scheduled for today or earlier</CardDescription></CardHeader>
           <CardContent className="p-0">
@@ -839,48 +862,152 @@ function Admissions({ currentUser }) {
 
       {view === 'kanban' && activeMonth !== 'all' && (
         <div className="overflow-x-auto pb-4"><div className="flex gap-4 min-w-max">
-          {STAGES.map(stage => { const stageLeads = filtered.filter(l => l.status === stage.key); return (
+          {ALL_STAGES.map(stage => { const stageLeads = filtered.filter(l => l.status === stage.key); const isCustom = customStages.some(s => s.key === stage.key); return (
             <div key={stage.key} onDragOver={e => e.preventDefault()} onDrop={() => { if (dragId) { moveLead(dragId, stage.key); setDragId(null); } }} className="w-80 flex-shrink-0">
-              <div className="flex items-center justify-between px-3 py-2 rounded-t-xl bg-white"><div className="flex items-center gap-2"><div className={`w-2 h-2 rounded-full ${stage.dot}`} /><span className="font-semibold text-sm">{stage.label}</span></div><Badge variant="secondary" className="bg-slate-100">{stageLeads.length}</Badge></div>
+              <div className="flex items-center justify-between px-3 py-2 rounded-t-xl bg-white">
+                <div className="flex items-center gap-2"><div className={`w-2 h-2 rounded-full ${stage.dot}`} /><span className="font-semibold text-sm">{stage.label}</span></div>
+                <div className="flex items-center gap-1"><Badge variant="secondary" className="bg-slate-100">{stageLeads.length}</Badge>{isCustom && <button onClick={() => removeStage(stage.key)} className="text-red-400 hover:text-red-600" title="Remove column"><X className="w-3.5 h-3.5" /></button>}</div>
+              </div>
               <div className="bg-slate-100 rounded-b-xl p-2 min-h-[400px] space-y-2">
                 {stageLeads.map(l => (
-                  <div key={l.id} draggable onDragStart={() => setDragId(l.id)} className="bg-white p-3 rounded-xl shadow-sm hover:shadow-md cursor-grab transition">
+                  <div key={l.id} draggable onDragStart={() => setDragId(l.id)} onClick={() => setDetailLead(l)} className="bg-white p-3 rounded-xl shadow-sm hover:shadow-md hover:ring-2 hover:ring-orange-300 cursor-pointer transition">
                     <div className="flex items-start justify-between gap-2"><div className="flex-1 min-w-0"><div className="font-semibold text-sm truncate">{l.name}</div><div className="text-xs text-slate-500 truncate">{l.course}</div></div><Badge variant="outline" className="text-[10px] px-1.5">{l.source}</Badge></div>
                     <div className="mt-2 space-y-1 text-xs text-slate-600"><div className="flex items-center gap-1.5"><Phone className="w-3 h-3" />{l.phone}</div></div>
-                    <div className="mt-2 pt-2 border-t flex items-center justify-between gap-1">
+                    {l.notes && <div className="mt-2 text-[11px] text-slate-500 bg-amber-50 border-l-2 border-amber-400 px-2 py-1 rounded truncate italic">📝 {l.notes}</div>}
+                    <div className="mt-2 pt-2 border-t flex items-center justify-between gap-1" onClick={e => e.stopPropagation()}>
                       <button onClick={() => openWhatsApp(l.phone, `Hi ${l.name}, Zero to Skill here about ${l.course}`)} className="text-emerald-600 hover:bg-emerald-50 rounded p-1"><MessageCircle className="w-3.5 h-3.5" /></button>
-                      <Select value={l.status} onValueChange={v => moveLead(l.id, v)}><SelectTrigger className="h-7 flex-1 text-[10px]"><SelectValue /></SelectTrigger><SelectContent>{STAGES.map(s => <SelectItem key={s.key} value={s.key} className="text-xs">{s.label}</SelectItem>)}</SelectContent></Select>
+                      <Select value={l.status} onValueChange={v => moveLead(l.id, v)}><SelectTrigger className="h-7 flex-1 text-[10px]"><SelectValue /></SelectTrigger><SelectContent>{ALL_STAGES.map(s => <SelectItem key={s.key} value={s.key} className="text-xs">{s.label}</SelectItem>)}</SelectContent></Select>
                     </div>
                   </div>
                 ))}
+                {!stageLeads.length && <div className="text-center text-xs text-slate-400 py-6">Drag leads here</div>}
               </div>
             </div>
           );})}
+          {/* Add New Column tile */}
+          <div className="w-80 flex-shrink-0">
+            <button onClick={addStage} className="w-full h-full min-h-[460px] rounded-xl border-2 border-dashed border-slate-300 hover:border-orange-400 bg-slate-50/50 hover:bg-orange-50/50 flex flex-col items-center justify-center gap-2 text-slate-500 hover:text-orange-600 transition">
+              <div className="w-12 h-12 rounded-full bg-white shadow-sm flex items-center justify-center"><Plus className="w-6 h-6" /></div>
+              <div className="font-semibold text-sm">Add Custom Column</div>
+              <div className="text-xs">e.g. Trial Booked, Not Interested</div>
+            </button>
+          </div>
         </div></div>
       )}
 
       {view === 'list' && activeMonth !== 'all' && (
         <div className="grid gap-3">
-          {filtered.map(l => { const stage = STAGES.find(s => s.key === l.status); return (
-            <Card key={l.id} className="rounded-2xl border-0 shadow-sm"><CardContent className="p-4 flex items-center gap-4 flex-wrap">
+          {filtered.map(l => { const stage = ALL_STAGES.find(s => s.key === l.status) || STAGES[0]; return (
+            <Card key={l.id} className="rounded-2xl border-0 shadow-sm hover:shadow-lg hover:ring-1 hover:ring-orange-200 cursor-pointer transition" onClick={() => setDetailLead(l)}><CardContent className="p-4 flex items-center gap-4 flex-wrap">
               <Avatar className="w-11 h-11"><AvatarFallback className="bg-orange-500 text-white text-sm font-bold">{initials(l.name)}</AvatarFallback></Avatar>
-              <div className="flex-1 min-w-[180px]"><div className="flex items-center gap-2"><div className="font-semibold">{l.name}</div><Badge className={`${stage.chip} border-0 text-[10px]`}>{stage.label}</Badge></div><div className="text-xs text-slate-500">{l.course} · {l.city || '—'}</div></div>
+              <div className="flex-1 min-w-[180px]"><div className="flex items-center gap-2"><div className="font-semibold">{l.name}</div><Badge className={`${stage.chip} border-0 text-[10px]`}>{stage.label}</Badge></div><div className="text-xs text-slate-500">{l.course} · {l.city || '—'}</div>{l.notes && <div className="text-[11px] text-amber-700 italic mt-0.5 truncate">📝 {l.notes}</div>}</div>
               <div className="text-sm"><div className="flex items-center gap-1.5 text-slate-600"><Phone className="w-3 h-3" />{l.phone}</div></div>
               <Badge variant="outline" className="text-[10px]">{l.source}</Badge>
-              <Button size="sm" onClick={() => openWhatsApp(l.phone, `Hi ${l.name}, Zero to Skill`)} className="bg-emerald-500 hover:bg-emerald-600 text-white h-8"><MessageCircle className="w-3.5 h-3.5" /></Button>
-              <Select value={l.status} onValueChange={v => moveLead(l.id, v)}><SelectTrigger className="h-8 w-36 text-xs"><SelectValue /></SelectTrigger><SelectContent>{STAGES.map(s => <SelectItem key={s.key} value={s.key} className="text-xs">{s.label}</SelectItem>)}</SelectContent></Select>
-              <Button size="icon" variant="ghost" onClick={() => del(l.id)} className="text-red-500 h-8 w-8"><Trash2 className="w-3.5 h-3.5" /></Button>
+              <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
+                <Button size="sm" onClick={() => openWhatsApp(l.phone, `Hi ${l.name}, Zero to Skill`)} className="bg-emerald-500 hover:bg-emerald-600 text-white h-8"><MessageCircle className="w-3.5 h-3.5" /></Button>
+                <Select value={l.status} onValueChange={v => moveLead(l.id, v)}><SelectTrigger className="h-8 w-36 text-xs"><SelectValue /></SelectTrigger><SelectContent>{ALL_STAGES.map(s => <SelectItem key={s.key} value={s.key} className="text-xs">{s.label}</SelectItem>)}</SelectContent></Select>
+                <Button size="icon" variant="ghost" onClick={() => del(l.id)} className="text-red-500 h-8 w-8"><Trash2 className="w-3.5 h-3.5" /></Button>
+              </div>
             </CardContent></Card>
           );})}
         </div>
       )}
 
       {view === 'excel' && activeMonth !== 'all' && (
-        <Card className="rounded-2xl border-0 shadow-sm"><CardContent className="p-0 overflow-x-auto"><table className="w-full text-xs border-collapse"><thead className="bg-slate-900 text-white"><tr>{['Name','Course','Source','Phone','City','Stage','Followup','Actions'].map(h => <th key={h} className="text-left px-3 py-2 font-semibold border border-slate-700">{h}</th>)}</tr></thead><tbody>{filtered.map((l, i) => { const stage = STAGES.find(s => s.key === l.status); return (<tr key={l.id} className={i % 2 === 0 ? 'bg-white' : 'bg-slate-50'}><td className="px-3 py-2 border font-medium">{l.name}</td><td className="px-3 py-2 border">{l.course}</td><td className="px-3 py-2 border">{l.source}</td><td className="px-3 py-2 border">{l.phone}</td><td className="px-3 py-2 border">{l.city || '—'}</td><td className="px-3 py-2 border"><Badge className={`${stage.chip} border-0 text-[10px]`}>{stage.label}</Badge></td><td className="px-3 py-2 border">{l.followupDate}</td><td className="px-3 py-2 border"><Select value={l.status} onValueChange={v => moveLead(l.id, v)}><SelectTrigger className="h-6 text-[10px] w-28"><SelectValue /></SelectTrigger><SelectContent>{STAGES.map(s => <SelectItem key={s.key} value={s.key} className="text-xs">{s.label}</SelectItem>)}</SelectContent></Select></td></tr>);})}</tbody></table></CardContent></Card>
+        <Card className="rounded-2xl border-0 shadow-sm"><CardContent className="p-0 overflow-x-auto"><table className="w-full text-xs border-collapse"><thead className="bg-slate-900 text-white"><tr>{['Name','Course','Source','Phone','City','Stage','Notes','Followup','Actions'].map(h => <th key={h} className="text-left px-3 py-2 font-semibold border border-slate-700">{h}</th>)}</tr></thead><tbody>{filtered.map((l, i) => { const stage = ALL_STAGES.find(s => s.key === l.status) || STAGES[0]; return (<tr key={l.id} className={`cursor-pointer hover:bg-orange-50 ${i % 2 === 0 ? 'bg-white' : 'bg-slate-50'}`} onClick={() => setDetailLead(l)}><td className="px-3 py-2 border font-medium">{l.name}</td><td className="px-3 py-2 border">{l.course}</td><td className="px-3 py-2 border">{l.source}</td><td className="px-3 py-2 border">{l.phone}</td><td className="px-3 py-2 border">{l.city || '—'}</td><td className="px-3 py-2 border"><Badge className={`${stage.chip} border-0 text-[10px]`}>{stage.label}</Badge></td><td className="px-3 py-2 border max-w-[180px] truncate italic text-amber-700">{l.notes ? '📝 ' + l.notes : <span className="text-slate-300">—</span>}</td><td className="px-3 py-2 border">{l.followupDate || '—'}</td><td className="px-3 py-2 border" onClick={e => e.stopPropagation()}><div className="flex items-center gap-1"><Select value={l.status} onValueChange={v => moveLead(l.id, v)}><SelectTrigger className="h-6 text-[10px] w-24"><SelectValue /></SelectTrigger><SelectContent>{ALL_STAGES.map(s => <SelectItem key={s.key} value={s.key} className="text-xs">{s.label}</SelectItem>)}</SelectContent></Select><button onClick={() => setDetailLead(l)} className="text-orange-600 hover:bg-orange-50 rounded p-1"><Edit3 className="w-3 h-3" /></button><button onClick={() => del(l.id)} className="text-red-500 hover:bg-red-50 rounded p-1"><Trash2 className="w-3 h-3" /></button></div></td></tr>);})}</tbody></table></CardContent></Card>
       )}
+
+      <LeadDetailDialog lead={detailLead} onClose={() => setDetailLead(null)} onUpdated={load} onDelete={async (id) => { await del(id); setDetailLead(null); }} stages={ALL_STAGES} courses={courses} />
     </div>
   );
 }
+
+// ---------------- LEAD DETAIL DIALOG ----------------
+function LeadDetailDialog({ lead, onClose, onUpdated, onDelete, stages, courses }) {
+  const [editing, setEditing] = useState(false);
+  const [form, setForm] = useState({});
+  useEffect(() => {
+    if (lead) { setForm({ ...lead }); setEditing(false); }
+  }, [lead?.id]);
+  if (!lead) return null;
+  const save = async () => {
+    try {
+      await api(`/leads/${lead.id}`, { method: 'PATCH', body: JSON.stringify(form) });
+      notify('Lead updated', form.name);
+      setEditing(false); onUpdated();
+    } catch (e) { toast.error(e.message); }
+  };
+  const stage = stages.find(s => s.key === lead.status) || stages[0];
+  return (
+    <Dialog open={!!lead} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-2xl max-h-[92vh] overflow-y-auto">
+        <DialogHeader>
+          <div className="flex items-start gap-3">
+            <Avatar className="w-14 h-14 flex-shrink-0"><AvatarFallback className="bg-gradient-to-br from-orange-500 to-red-500 text-white text-lg font-bold">{initials(lead.name)}</AvatarFallback></Avatar>
+            <div className="flex-1">
+              <DialogTitle className="text-2xl">{editing ? <Input value={form.name || ''} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} className="text-xl font-bold" /> : lead.name}</DialogTitle>
+              <div className="flex items-center gap-2 mt-1 flex-wrap"><Badge className={`${stage.chip} border-0`}>{stage.label}</Badge><Badge variant="outline" className="text-[10px]">{lead.source}</Badge><span className="text-xs text-slate-500">Created: {(lead.createdAt || '').slice(0, 10)}</span></div>
+            </div>
+          </div>
+        </DialogHeader>
+
+        {!editing ? (
+          <>
+            <div className="grid grid-cols-2 gap-3 mt-2">
+              <InfoRow icon={Phone} label="Phone" value={lead.phone} />
+              <InfoRow icon={Mail} label="Email" value={lead.email || '—'} />
+              <InfoRow icon={GraduationCap} label="Course" value={lead.course} />
+              <InfoRow icon={MapPin} label="City" value={lead.city || '—'} />
+              <InfoRow icon={CalendarDays} label="Follow-up Date" value={lead.followupDate || '—'} />
+              <InfoRow icon={Users} label="Parent" value={lead.parentName || '—'} />
+            </div>
+            <div className="mt-3">
+              <div className="text-xs text-slate-500 font-semibold uppercase mb-1">Notes</div>
+              <div className={`rounded-xl p-3 text-sm ${lead.notes ? 'bg-amber-50 border border-amber-200 text-slate-800' : 'bg-slate-50 border border-slate-200 text-slate-400 italic'}`}>{lead.notes || 'No notes yet — click Edit to add.'}</div>
+            </div>
+            <DialogFooter className="mt-4 flex-wrap gap-2 sm:justify-between">
+              <div className="flex gap-2">
+                <Button variant="outline" onClick={() => openWhatsApp(lead.phone, `Hi ${lead.name}, this is Zero to Skill Institute about ${lead.course}`)} className="text-emerald-700 border-emerald-200 hover:bg-emerald-50"><MessageCircle className="w-4 h-4 mr-1" /> WhatsApp</Button>
+                <a href={`tel:${lead.phone}`}><Button variant="outline" className="text-blue-700 border-blue-200 hover:bg-blue-50"><Phone className="w-4 h-4 mr-1" /> Call</Button></a>
+              </div>
+              <div className="flex gap-2">
+                <Button variant="outline" onClick={() => onDelete(lead.id)} className="text-red-600 border-red-200 hover:bg-red-50"><Trash2 className="w-4 h-4 mr-1" /> Delete</Button>
+                <Button onClick={() => setEditing(true)} className="bg-orange-500 hover:bg-orange-600 text-white"><Edit3 className="w-4 h-4 mr-1" /> Edit Lead</Button>
+              </div>
+            </DialogFooter>
+          </>
+        ) : (
+          <>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Full Name"><Input value={form.name || ''} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} /></Field>
+              <Field label="Phone"><Input value={form.phone || ''} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} /></Field>
+              <Field label="Email"><Input value={form.email || ''} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} /></Field>
+              <Field label="City"><Input value={form.city || ''} onChange={e => setForm(f => ({ ...f, city: e.target.value }))} /></Field>
+              <Field label="Course"><Select value={form.course || ''} onValueChange={v => setForm(f => ({ ...f, course: v }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{courses.map(c => <SelectItem key={c.id} value={c.name}>{c.name}</SelectItem>)}</SelectContent></Select></Field>
+              <Field label="Source"><Select value={form.source || ''} onValueChange={v => setForm(f => ({ ...f, source: v }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{['Website Form','Instagram Ad','YouTube Ad','Google Ad','Referral','Walk-in','LinkedIn','WhatsApp'].map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent></Select></Field>
+              <Field label="Stage"><Select value={form.status || ''} onValueChange={v => setForm(f => ({ ...f, status: v }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{stages.map(s => <SelectItem key={s.key} value={s.key}>{s.label}</SelectItem>)}</SelectContent></Select></Field>
+              <Field label="Followup Date"><Input type="date" value={form.followupDate || ''} onChange={e => setForm(f => ({ ...f, followupDate: e.target.value }))} /></Field>
+              <Field label="Parent Name"><Input value={form.parentName || ''} onChange={e => setForm(f => ({ ...f, parentName: e.target.value }))} /></Field>
+              <Field label="Parent Phone"><Input value={form.parentPhone || ''} onChange={e => setForm(f => ({ ...f, parentPhone: e.target.value }))} /></Field>
+              <Field label="Notes" full><Textarea rows={4} placeholder="Anything you want to remember about this lead…" value={form.notes || ''} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} /></Field>
+            </div>
+            <DialogFooter className="mt-2">
+              <Button variant="outline" onClick={() => { setForm({ ...lead }); setEditing(false); }}>Cancel</Button>
+              <Button onClick={save} className="bg-orange-500 hover:bg-orange-600 text-white"><CheckCircle2 className="w-4 h-4 mr-1" /> Save Changes</Button>
+            </DialogFooter>
+          </>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+const InfoRow = ({ icon: Icon, label, value }) => (
+  <div className="flex items-start gap-2 p-2.5 rounded-lg bg-slate-50">
+    <Icon className="w-4 h-4 text-orange-500 mt-0.5" />
+    <div className="min-w-0"><div className="text-[10px] uppercase text-slate-400 font-bold">{label}</div><div className="text-sm font-medium text-slate-800 truncate">{value}</div></div>
+  </div>
+);
 
 function AddLeadDialog({ open, setOpen, onCreated, courses }) {
   const [form, setForm] = useState({ name: '', email: '', phone: '', course: '', source: 'Website Form', notes: '', followupDate: '', parentName: '', parentPhone: '', city: '' });
