@@ -26,6 +26,7 @@ import {
   Receipt, Printer, HelpCircle, ThumbsUp, Flame, Award, UserCog,
   ChevronLeft, PanelLeftClose, PanelLeftOpen, Layers, Video, FileText,
   PlayCircle, ClipboardList, Upload, Zap, Percent, FolderPlus, Library,
+  TrendingDown, PiggyBank, Tag, Building2,
 } from 'lucide-react';
 
 const API = '/api';
@@ -469,7 +470,7 @@ function Dashboard({ user, goTo }) {
 
 // ---------------- STUDENT FORM ----------------
 function StudentFormDialog({ open, setOpen, existing, batches, courses, folders, onSaved, currentUser }) {
-  const empty = { firstName: '', lastName: '', dob: '', gender: 'Male', aadhaar: '', email: '', phone: '', address: '', city: '', state: '', pincode: '', parentName: '', parentPhone: '', parentOccupation: '', source: 'Instagram', course: courses[0]?.name || '', batchId: '', installmentCount: 3, folderId: '', password: 'student@123' };
+  const empty = { firstName: '', lastName: '', dob: '', gender: 'Male', aadhaar: '', email: '', phone: '', address: '', city: '', state: '', pincode: '', parentName: '', parentPhone: '', parentOccupation: '', source: 'Instagram', course: courses[0]?.name || '', batchId: '', installmentCount: 3, folderId: '', password: 'student@123', totalAmount: '' };
   const [form, setForm] = useState(empty);
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
   useEffect(() => { setForm(existing ? { ...empty, installmentCount: 3, ...existing } : { ...empty, course: courses[0]?.name || '' }); }, [existing, open, courses]);
@@ -515,6 +516,10 @@ function StudentFormDialog({ open, setOpen, existing, batches, courses, folders,
           <Field label="Course *"><Select value={form.course} onValueChange={v => { set('course', v); set('batchId', ''); }}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{courses.map(c => <SelectItem key={c.id} value={c.name}>{c.name} · {formatINR(c.fee)}</SelectItem>)}</SelectContent></Select></Field>
           <Field label="Batch"><Select value={form.batchId} onValueChange={v => set('batchId', v)}><SelectTrigger><SelectValue placeholder={filteredBatches.length ? 'Select batch' : 'Create batch first'} /></SelectTrigger><SelectContent>{filteredBatches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}</SelectContent></Select></Field>
           <Field label="Folder (optional)"><Select value={form.folderId || 'none'} onValueChange={v => set('folderId', v === 'none' ? '' : v)}><SelectTrigger><SelectValue placeholder="No folder" /></SelectTrigger><SelectContent><SelectItem value="none">No folder</SelectItem>{folders.filter(f => f.type === 'student').map(f => <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>)}</SelectContent></Select></Field>
+          <Field label="Total Fee Amount (₹)" full>
+            <Input type="number" min="0" placeholder="Enter amount manually (e.g. 45000). Leave empty to use course default" value={form.totalAmount} onChange={e => set('totalAmount', e.target.value)} />
+            <div className="text-[11px] text-slate-500 mt-1">This will be reflected in Fees & Finance module. Split into installments below.</div>
+          </Field>
           <Field label="Number of Installments" full>
             <RadioGroup value={String(form.installmentCount)} onValueChange={v => set('installmentCount', Number(v))} className="flex gap-3 pt-1">
               {[1,2,3].map(n => <label key={n} className={`flex items-center gap-2 cursor-pointer border rounded-full px-4 py-1.5 ${form.installmentCount === n ? 'border-orange-500 bg-orange-50' : ''}`}><RadioGroupItem value={String(n)} /><span>{n === 1 ? 'Full (1 payment)' : `${n} Installments`}</span></label>)}
@@ -844,6 +849,8 @@ function ReceiptView({ receipt, onClose }) {
 
 // ---------------- FEES ----------------
 function Fees({ currentUser }) {
+  const [tab, setTab] = useState('fees'); // 'fees' | 'expenses'
+  const isSuper = currentUser?.role === 'super_admin';
   const [fees, setFees] = useState([]);
   const [batches, setBatches] = useState([]);
   const [stats, setStats] = useState(null);
@@ -909,9 +916,18 @@ function Fees({ currentUser }) {
     <div className="space-y-6">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>{openBatch ? (<><Button variant="ghost" size="sm" onClick={() => setOpenBatchId(null)} className="mb-1 -ml-2"><ArrowLeft className="w-4 h-4 mr-1" /> Back</Button><h1 className="text-3xl font-bold flex items-center gap-2"><FolderOpen className="w-7 h-7 text-orange-500" /> {openBatch.name} · Fees</h1></>) : (<><h1 className="text-3xl font-bold">Fees & Finance</h1><p className="text-slate-500">Manage collections, EMIs & installments</p></>)}</div>
-        <Button onClick={() => setAddOpen(true)} className="rounded-full bg-orange-500 hover:bg-orange-600 text-white"><Plus className="w-4 h-4 mr-1" /> New Fee</Button>
+        {tab === 'fees' && <Button onClick={() => setAddOpen(true)} className="rounded-full bg-orange-500 hover:bg-orange-600 text-white"><Plus className="w-4 h-4 mr-1" /> New Fee</Button>}
       </div>
 
+      {isSuper && (
+        <div className="inline-flex bg-slate-100 p-1 rounded-full">
+          <button onClick={() => setTab('fees')} className={`px-5 py-2 rounded-full text-sm font-semibold transition ${tab === 'fees' ? 'bg-white shadow text-slate-900' : 'text-slate-600 hover:text-slate-900'}`}><IndianRupee className="w-4 h-4 mr-1 inline" /> Fees Collection</button>
+          <button onClick={() => setTab('expenses')} className={`px-5 py-2 rounded-full text-sm font-semibold transition ${tab === 'expenses' ? 'bg-white shadow text-slate-900' : 'text-slate-600 hover:text-slate-900'}`}><TrendingDown className="w-4 h-4 mr-1 inline" /> Expenses</button>
+        </div>
+      )}
+
+      {tab === 'expenses' && isSuper && <ExpensesPanel currentUser={currentUser} />}
+      {!(tab === 'expenses' && isSuper) && <>
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {kpis.map(c => (<Card key={c.label} className="rounded-2xl border-0 shadow-sm"><CardContent className="p-5"><div className={`w-10 h-10 rounded-xl ${c.bg} ${c.text} flex items-center justify-center`}><c.icon className="w-5 h-5" /></div><div className="mt-3 text-2xl font-bold">{c.value}</div><div className="text-sm text-slate-500">{c.label}</div></CardContent></Card>))}
       </div>
@@ -989,6 +1005,151 @@ function Fees({ currentUser }) {
       </Dialog>
 
       <ReceiptView receipt={receipt} onClose={() => setReceipt(null)} />
+      </>}
+    </div>
+  );
+}
+
+// ---------------- EXPENSES PANEL (Super Admin only) ----------------
+const EXPENSE_CATEGORIES = ['Rent', 'Salaries', 'Utilities', 'Marketing', 'Software / Tools', 'Office Supplies', 'Travel', 'Maintenance', 'Equipment', 'Taxes', 'Miscellaneous'];
+const CATEGORY_COLORS = { Rent: 'bg-purple-100 text-purple-700', Salaries: 'bg-blue-100 text-blue-700', Utilities: 'bg-cyan-100 text-cyan-700', Marketing: 'bg-pink-100 text-pink-700', 'Software / Tools': 'bg-indigo-100 text-indigo-700', 'Office Supplies': 'bg-amber-100 text-amber-700', Travel: 'bg-teal-100 text-teal-700', Maintenance: 'bg-slate-200 text-slate-700', Equipment: 'bg-emerald-100 text-emerald-700', Taxes: 'bg-red-100 text-red-700', Miscellaneous: 'bg-gray-100 text-gray-700' };
+
+function ExpensesPanel({ currentUser }) {
+  const [expenses, setExpenses] = useState([]);
+  const [stats, setStats] = useState(null);
+  const [addOpen, setAddOpen] = useState(false);
+  const [editing, setEditing] = useState(null);
+  const [search, setSearch] = useState('');
+  const [filterCat, setFilterCat] = useState('all');
+  const empty = { category: 'Rent', amount: '', description: '', date: new Date().toISOString().slice(0, 10), paidTo: '', paymentMode: 'cash' };
+  const [form, setForm] = useState(empty);
+
+  const load = async () => {
+    try {
+      const [e, s] = await Promise.all([api('/expenses'), api('/expenses/stats')]);
+      setExpenses(e.expenses || []);
+      setStats(s);
+    } catch (err) { toast.error(err.message); }
+  };
+  useEffect(() => { load(); }, []);
+
+  const openAdd = () => { setEditing(null); setForm(empty); setAddOpen(true); };
+  const openEdit = (e) => { setEditing(e); setForm({ category: e.category, amount: String(e.amount), description: e.description || '', date: e.date, paidTo: e.paidTo || '', paymentMode: e.paymentMode || 'cash' }); setAddOpen(true); };
+
+  const submit = async () => {
+    if (!form.category || !form.amount || Number(form.amount) <= 0) return toast.error('Category and valid amount required');
+    try {
+      if (editing) {
+        await api(`/expenses/${editing.id}`, { method: 'PATCH', body: JSON.stringify(form) });
+        notify('Expense updated', `${form.category} · ${formatINR(Number(form.amount))}`);
+      } else {
+        await api('/expenses', { method: 'POST', body: JSON.stringify(form) });
+        notify('Expense recorded', `${form.category} · ${formatINR(Number(form.amount))}`);
+      }
+      setAddOpen(false); load();
+    } catch (e) { toast.error(e.message); }
+  };
+
+  const del = async (e) => {
+    if (!confirm(`Delete expense "${e.category} · ${formatINR(e.amount)}"?`)) return;
+    try { await api(`/expenses/${e.id}`, { method: 'DELETE' }); notify('Expense deleted'); load(); } catch (err) { toast.error(err.message); }
+  };
+
+  const filtered = expenses.filter(e => {
+    if (filterCat !== 'all' && e.category !== filterCat) return false;
+    if (!search) return true;
+    return (e.description || '').toLowerCase().includes(search.toLowerCase()) || (e.paidTo || '').toLowerCase().includes(search.toLowerCase()) || e.category.toLowerCase().includes(search.toLowerCase());
+  });
+
+  if (!stats) return <div className="text-slate-500">Loading expenses…</div>;
+
+  const kpis = [
+    { label: 'Total Revenue', value: formatINR(stats.totalRevenue), icon: TrendingUp, bg: 'bg-emerald-100', text: 'text-emerald-700', border: 'border-l-emerald-500' },
+    { label: 'Total Expenses', value: formatINR(stats.totalExpenses), icon: TrendingDown, bg: 'bg-red-100', text: 'text-red-700', border: 'border-l-red-500' },
+    { label: 'Net Profit', value: formatINR(stats.netProfit), icon: PiggyBank, bg: stats.netProfit >= 0 ? 'bg-orange-100' : 'bg-rose-100', text: stats.netProfit >= 0 ? 'text-orange-700' : 'text-rose-700', border: stats.netProfit >= 0 ? 'border-l-orange-500' : 'border-l-rose-500' },
+    { label: 'Total Entries', value: stats.expenseCount, icon: Receipt, bg: 'bg-slate-100', text: 'text-slate-700', border: 'border-l-slate-500' },
+  ];
+
+  const catEntries = Object.entries(stats.byCategory || {}).sort((a, b) => b[1] - a[1]);
+  const maxCat = catEntries.length ? catEntries[0][1] : 1;
+
+  return (
+    <div className="space-y-6">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        {kpis.map(c => (
+          <Card key={c.label} className={`rounded-2xl border-0 border-l-4 ${c.border} shadow-sm`}>
+            <CardContent className="p-5">
+              <div className={`w-10 h-10 rounded-xl ${c.bg} ${c.text} flex items-center justify-center`}><c.icon className="w-5 h-5" /></div>
+              <div className="mt-3 text-2xl font-bold">{c.value}</div>
+              <div className="text-sm text-slate-500">{c.label}</div>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+
+      {catEntries.length > 0 && (
+        <Card className="rounded-2xl border-0 shadow-sm">
+          <CardHeader className="pb-3"><CardTitle className="text-base flex items-center gap-2"><Tag className="w-4 h-4 text-orange-500" /> Category Breakdown</CardTitle><CardDescription>Where the money is going</CardDescription></CardHeader>
+          <CardContent className="space-y-3">
+            {catEntries.map(([cat, amt]) => (
+              <div key={cat}>
+                <div className="flex justify-between text-sm mb-1">
+                  <span className="font-medium">{cat}</span>
+                  <span className="text-slate-700 font-semibold">{formatINR(amt)}</span>
+                </div>
+                <div className="h-2 rounded-full bg-slate-100 overflow-hidden">
+                  <div className="h-full bg-gradient-to-r from-orange-400 to-red-500 rounded-full transition-all" style={{ width: `${(amt / maxCat) * 100}%` }} />
+                </div>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
+
+      <Card className="rounded-2xl border-0 shadow-sm">
+        <CardHeader className="flex-row items-center justify-between space-y-0 flex-wrap gap-3">
+          <div><CardTitle className="flex items-center gap-2"><Building2 className="w-5 h-5 text-orange-500" /> Expense Ledger</CardTitle><CardDescription>All recorded institute expenses</CardDescription></div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="relative"><Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" /><Input placeholder="Search..." className="pl-9 w-52 rounded-full" value={search} onChange={e => setSearch(e.target.value)} /></div>
+            <Select value={filterCat} onValueChange={setFilterCat}><SelectTrigger className="w-44 rounded-full"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All Categories</SelectItem>{EXPENSE_CATEGORIES.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent></Select>
+            <Button onClick={openAdd} className="rounded-full bg-orange-500 hover:bg-orange-600 text-white"><Plus className="w-4 h-4 mr-1" /> New Expense</Button>
+          </div>
+        </CardHeader>
+        <CardContent className="p-0">
+          <Table>
+            <TableHeader className="bg-slate-50"><TableRow><TableHead>Date</TableHead><TableHead>Category</TableHead><TableHead>Description</TableHead><TableHead>Paid To</TableHead><TableHead>Mode</TableHead><TableHead className="text-right">Amount</TableHead><TableHead></TableHead></TableRow></TableHeader>
+            <TableBody>
+              {filtered.map(e => (
+                <TableRow key={e.id}>
+                  <TableCell className="text-sm">{e.date}</TableCell>
+                  <TableCell><Badge className={`border-0 ${CATEGORY_COLORS[e.category] || 'bg-slate-100 text-slate-700'}`}>{e.category}</Badge></TableCell>
+                  <TableCell className="max-w-[280px] truncate text-sm text-slate-700">{e.description || <span className="text-slate-400">—</span>}</TableCell>
+                  <TableCell className="text-sm">{e.paidTo || <span className="text-slate-400">—</span>}</TableCell>
+                  <TableCell className="text-xs uppercase text-slate-500">{e.paymentMode}</TableCell>
+                  <TableCell className="text-right font-bold text-red-600">- {formatINR(e.amount)}</TableCell>
+                  <TableCell><div className="flex gap-1"><Button size="icon" variant="ghost" onClick={() => openEdit(e)}><Edit3 className="w-4 h-4" /></Button><Button size="icon" variant="ghost" onClick={() => del(e)}><Trash2 className="w-4 h-4 text-red-500" /></Button></div></TableCell>
+                </TableRow>
+              ))}
+              {!filtered.length && (<TableRow><TableCell colSpan={7} className="text-center py-10 text-slate-400"><TrendingDown className="w-10 h-10 mx-auto opacity-40 mb-2" />No expenses recorded yet. Click "New Expense" to add one.</TableCell></TableRow>)}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+
+      <Dialog open={addOpen} onOpenChange={setAddOpen}>
+        <DialogContent className="max-w-xl max-h-[92vh] overflow-y-auto">
+          <DialogHeader><DialogTitle>{editing ? 'Edit Expense' : 'Record New Expense'}</DialogTitle><DialogDescription>Track institute expenses for accurate net profit reporting</DialogDescription></DialogHeader>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Category *"><Select value={form.category} onValueChange={v => setForm(f => ({ ...f, category: v }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{EXPENSE_CATEGORIES.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent></Select></Field>
+            <Field label="Amount (₹) *"><Input type="number" min="0" placeholder="e.g. 15000" value={form.amount} onChange={e => setForm(f => ({ ...f, amount: e.target.value }))} /></Field>
+            <Field label="Date *"><Input type="date" value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} /></Field>
+            <Field label="Payment Mode"><Select value={form.paymentMode} onValueChange={v => setForm(f => ({ ...f, paymentMode: v }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{['cash','upi','bank_transfer','card','cheque'].map(m => <SelectItem key={m} value={m}>{m.replace('_',' ').toUpperCase()}</SelectItem>)}</SelectContent></Select></Field>
+            <Field label="Paid To" full><Input placeholder="Vendor / Recipient name" value={form.paidTo} onChange={e => setForm(f => ({ ...f, paidTo: e.target.value }))} /></Field>
+            <Field label="Description" full><Textarea rows={2} placeholder="e.g. October office rent, electricity bill…" value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} /></Field>
+          </div>
+          <DialogFooter><Button variant="outline" onClick={() => setAddOpen(false)}>Cancel</Button><Button onClick={submit} className="bg-orange-500 hover:bg-orange-600 text-white">{editing ? 'Update Expense' : 'Save Expense'}</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

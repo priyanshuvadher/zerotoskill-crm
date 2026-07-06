@@ -195,6 +195,36 @@ export async function GET(request, { params }) {
       return ok({ totalRevenue, pendingRevenue, fullyPaid, partial, pending, byCourse });
     }
 
+    // EXPENSES (Super Admin only)
+    if (route === 'expenses') {
+      const me = await currentUser(request); if (!me) return err('Unauthorized', 401);
+      if (me.role !== 'super_admin') return err('Forbidden', 403);
+      const expenses = await db.collection('expenses').find({}, { projection: { _id: 0 } }).sort({ date: -1, createdAt: -1 }).toArray();
+      return ok({ expenses });
+    }
+
+    if (route === 'expenses/stats') {
+      const me = await currentUser(request); if (!me) return err('Unauthorized', 401);
+      if (me.role !== 'super_admin') return err('Forbidden', 403);
+      const expenses = await db.collection('expenses').find({}).toArray();
+      const totalExpenses = expenses.reduce((a, e) => a + (Number(e.amount) || 0), 0);
+      const fees = await db.collection('fees').find({}).toArray();
+      const totalRevenue = fees.reduce((a, f) => a + (f.paidAmount || 0), 0);
+      const netProfit = totalRevenue - totalExpenses;
+      const byCategory = {};
+      for (const e of expenses) {
+        const cat = e.category || 'Miscellaneous';
+        byCategory[cat] = (byCategory[cat] || 0) + (Number(e.amount) || 0);
+      }
+      // Monthly breakdown (last 6 months)
+      const monthly = {};
+      for (const e of expenses) {
+        const m = (e.date || e.createdAt || new Date().toISOString()).slice(0, 7); // YYYY-MM
+        monthly[m] = (monthly[m] || 0) + (Number(e.amount) || 0);
+      }
+      return ok({ totalExpenses, totalRevenue, netProfit, expenseCount: expenses.length, byCategory, monthly });
+    }
+
     if (route === 'dashboard/stats') {
       const [totalStudents, totalLeads, totalBatches, totalFaculty, totalCourses] = await Promise.all([
         db.collection('users').countDocuments({ role: 'student' }),
@@ -387,7 +417,7 @@ export async function POST(request, { params }) {
       const me = await currentUser(request);
       if (!me || !['super_admin', 'counselor', 'academic_manager'].includes(me.role)) return err('Forbidden', 403);
       const body = await request.json();
-      const { firstName, lastName, email, phone, dob, gender, aadhaar, address, city, state, pincode, parentName, parentPhone, parentOccupation, source, course, batchId, installmentCount = 3, folderId, password = 'student@123' } = body;
+      const { firstName, lastName, email, phone, dob, gender, aadhaar, address, city, state, pincode, parentName, parentPhone, parentOccupation, source, course, batchId, installmentCount = 3, folderId, password = 'student@123', totalAmount: manualTotal } = body;
       if (!firstName || !lastName || !email || !course) return err('Missing required fields');
       const existing = await db.collection('users').findOne({ email });
       if (existing) return err('Email already exists');
@@ -406,7 +436,7 @@ export async function POST(request, { params }) {
       await db.collection('users').insertOne(user);
 
       const feesMap = await getCourseFees(db);
-      const totalAmount = feesMap[course] || 30000;
+      const totalAmount = (manualTotal !== undefined && manualTotal !== null && manualTotal !== '' && Number(manualTotal) > 0) ? Number(manualTotal) : (feesMap[course] || 30000);
       const installments = buildInstallments(totalAmount, installmentCount);
       const fee = {
         id: uuidv4(), studentId: user.id, studentName: user.name, studentEmail: user.email,
@@ -481,6 +511,27 @@ export async function POST(request, { params }) {
       const receiptNo = 'ZTS-' + Date.now().toString().slice(-8);
       await db.collection('payments').insertOne({ id: uuidv4(), feeId, studentId: fee.studentId, studentName: fee.studentName, amount: fee.installments[installmentIndex].amount, method, receiptNo, paidAt: new Date().toISOString(), installmentLabel: fee.installments[installmentIndex].label });
       return ok({ success: true, receiptNo, fee: { ...updated, _id: undefined } });
+    }
+
+    // CREATE EXPENSE (Super Admin only)
+    if (route === 'expenses') {
+      const me = await currentUser(request); if (!me) return err('Unauthorized', 401);
+      if (me.role !== 'super_admin') return err('Forbidden', 403);
+      const { category, amount, description = '', date, paidTo = '', paymentMode = 'cash' } = await request.json();
+      if (!category || amount === undefined || amount === null || amount === '') return err('Category and amount required');
+      const amt = Number(amount);
+      if (!(amt > 0)) return err('Amount must be greater than 0');
+      const expense = {
+        id: uuidv4(),
+        category, amount: amt, description,
+        date: date || new Date().toISOString().slice(0, 10),
+        paidTo, paymentMode,
+        createdBy: me.id, createdByName: me.name,
+        createdAt: new Date().toISOString(),
+      };
+      await db.collection('expenses').insertOne(expense);
+      const { _id, ...safe } = expense;
+      return ok({ expense: safe });
     }
 
     // COMMUNITY
@@ -686,6 +737,21 @@ export async function PATCH(request, { params }) {
       await db.collection('courses').updateOne({ id: p[1] }, { $set: body });
       return ok({ success: true });
     }
+    // UPDATE EXPENSE (Super Admin only)
+    if (p[0] === 'expenses' && p[1]) {
+      const me = await currentUser(request); if (!me) return err('Unauthorized', 401);
+      if (me.role !== 'super_admin') return err('Forbidden', 403);
+      const body = await request.json();
+      const patch = {};
+      if (body.category !== undefined) patch.category = body.category;
+      if (body.amount !== undefined) patch.amount = Number(body.amount);
+      if (body.description !== undefined) patch.description = body.description;
+      if (body.date !== undefined) patch.date = body.date;
+      if (body.paidTo !== undefined) patch.paidTo = body.paidTo;
+      if (body.paymentMode !== undefined) patch.paymentMode = body.paymentMode;
+      await db.collection('expenses').updateOne({ id: p[1] }, { $set: patch });
+      return ok({ success: true });
+    }
     return err('Not found', 404);
   } catch (e) {
     console.error('PATCH error', e);
@@ -726,6 +792,12 @@ export async function DELETE(request, { params }) {
       if (post.authorId !== me.id && me.role !== 'super_admin') return err('Forbidden', 403);
       await db.collection('posts').deleteOne({ id: p[2] });
       await db.collection('comments').deleteMany({ postId: p[2] });
+      return ok({ success: true });
+    }
+    if (p[0] === 'expenses' && p[1]) {
+      const me = await currentUser(request); if (!me) return err('Unauthorized', 401);
+      if (me.role !== 'super_admin') return err('Forbidden', 403);
+      await db.collection('expenses').deleteOne({ id: p[1] });
       return ok({ success: true });
     }
     return err('Not found', 404);
