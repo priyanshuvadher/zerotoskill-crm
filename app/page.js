@@ -15,6 +15,7 @@ import { Progress } from '@/components/ui/progress';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { toast } from 'sonner';
+import { Switch } from '@/components/ui/switch';
 import { browserNotify, requestNotifPermission } from '@/lib/notify';
 import {
   LayoutDashboard, Users, UserPlus, GraduationCap, IndianRupee, BookOpen,
@@ -65,7 +66,12 @@ const initials = (name) => (name || '').split(' ').map(w => w[0]).slice(0, 2).jo
 // Notify + toast helper
 function notify(title, body) {
   toast.success(title, { description: body });
-  browserNotify(title, body || '');
+  // Only fire browser notification if user opted-in (default ON) AND permission granted
+  if (typeof window !== 'undefined') {
+    const pref = localStorage.getItem('zts_notif_pref');
+    const optedIn = pref === null ? true : pref === 'on'; // default ON
+    if (optedIn) browserNotify(title, body || '');
+  }
 }
 
 // WhatsApp send helper
@@ -1914,15 +1920,109 @@ function Community({ currentUser }) {
 function SettingsPage({ currentUser, onUserUpdate }) {
   const [pwForm, setPwForm] = useState({ currentPassword: '', newPassword: '', confirm: '' });
   const [emailForm, setEmailForm] = useState({ newEmail: currentUser.email, password: '' });
-  const [notifEnabled, setNotifEnabled] = useState(typeof window !== 'undefined' && Notification.permission === 'granted');
+  const [permission, setPermission] = useState(typeof window !== 'undefined' && 'Notification' in window ? Notification.permission : 'unsupported');
+  const [notifOn, setNotifOn] = useState(() => { if (typeof window === 'undefined') return true; const p = localStorage.getItem('zts_notif_pref'); return p === null ? true : p === 'on'; });
+
   const changePw = async () => { if (pwForm.newPassword !== pwForm.confirm) return toast.error('Passwords do not match'); if (pwForm.newPassword.length < 6) return toast.error('Min 6 chars'); try { await api('/auth/change-password', { method: 'POST', body: JSON.stringify({ currentPassword: pwForm.currentPassword, newPassword: pwForm.newPassword }) }); notify('Password updated'); setPwForm({ currentPassword: '', newPassword: '', confirm: '' }); } catch (e) { toast.error(e.message); } };
   const changeEmail = async () => { try { await api('/auth/change-email', { method: 'POST', body: JSON.stringify({ newEmail: emailForm.newEmail, password: emailForm.password }) }); notify('Email updated'); onUserUpdate({ ...currentUser, email: emailForm.newEmail }); setEmailForm({ ...emailForm, password: '' }); } catch (e) { toast.error(e.message); } };
-  const enableNotifs = () => { requestNotifPermission(); setTimeout(() => setNotifEnabled(Notification.permission === 'granted'), 500); };
+
+  const toggleNotifs = async (checked) => {
+    if (checked) {
+      if (permission === 'default') {
+        const res = await Notification.requestPermission();
+        setPermission(res);
+        if (res !== 'granted') { toast.error('Browser blocked notifications. Enable them in browser settings.'); return; }
+      } else if (permission === 'denied') {
+        toast.error('Notifications are blocked. Please allow them from your browser site settings (padlock icon in address bar).');
+        return;
+      }
+      setNotifOn(true);
+      localStorage.setItem('zts_notif_pref', 'on');
+      notify('Notifications enabled', 'You\'ll get instant alerts for leads, payments, submissions & more');
+    } else {
+      setNotifOn(false);
+      localStorage.setItem('zts_notif_pref', 'off');
+      toast.info('Browser notifications turned off');
+    }
+  };
+
+  const testNotif = () => {
+    if (!notifOn) return toast.error('Turn on notifications first');
+    if (permission !== 'granted') return toast.error('Browser permission not granted');
+    browserNotify('🔔 Test Notification', 'Zero to Skill CRM notifications are working perfectly!');
+    toast.success('Test notification fired', { description: 'Check your desktop / notification tray' });
+  };
+
+  const permBadge = permission === 'granted'
+    ? { text: 'Browser Permission: Granted', cls: 'bg-emerald-100 text-emerald-700', dot: 'bg-emerald-500' }
+    : permission === 'denied'
+    ? { text: 'Browser Permission: Blocked', cls: 'bg-red-100 text-red-700', dot: 'bg-red-500' }
+    : permission === 'default'
+    ? { text: 'Browser Permission: Not Asked', cls: 'bg-amber-100 text-amber-700', dot: 'bg-amber-500' }
+    : { text: 'Browser: Not Supported', cls: 'bg-slate-200 text-slate-600', dot: 'bg-slate-400' };
+
   return (
     <div className="space-y-6 max-w-3xl">
       <div><h1 className="text-3xl font-bold">Settings</h1><p className="text-slate-500">Manage your account</p></div>
       <Card className="rounded-2xl border-0 shadow-sm"><CardHeader><CardTitle className="flex items-center gap-2"><ShieldCheck className="w-5 h-5 text-orange-500" /> Profile</CardTitle></CardHeader><CardContent><div className="flex items-center gap-4"><Avatar className="w-16 h-16"><AvatarFallback className="bg-orange-500 text-white text-xl font-bold">{initials(currentUser.name)}</AvatarFallback></Avatar><div><div className="text-xl font-bold">{currentUser.name}</div><div className="text-sm text-slate-500">{currentUser.email}</div><Badge className={`${ROLE_META[currentUser.role]?.chip} border-0 mt-1`}>{ROLE_META[currentUser.role]?.label}</Badge></div></div></CardContent></Card>
-      <Card className="rounded-2xl border-0 shadow-sm"><CardHeader><CardTitle className="flex items-center gap-2"><Bell className="w-5 h-5 text-orange-500" /> Browser Notifications</CardTitle><CardDescription>Get instant notifications for new leads, submissions, payments</CardDescription></CardHeader><CardContent><Button onClick={enableNotifs} disabled={notifEnabled} className="bg-orange-500 hover:bg-orange-600 text-white">{notifEnabled ? '✓ Notifications Enabled' : 'Enable Notifications'}</Button></CardContent></Card>
+
+      <Card className="rounded-2xl border-0 shadow-sm overflow-hidden">
+        <div className={`h-1 ${notifOn && permission === 'granted' ? 'bg-gradient-to-r from-orange-400 via-red-500 to-amber-500' : 'bg-slate-200'}`} />
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2"><Bell className={`w-5 h-5 ${notifOn && permission === 'granted' ? 'text-orange-500 animate-pulse' : 'text-slate-400'}`} /> Browser Notifications</CardTitle>
+          <CardDescription>Get instant desktop pop-ups for new leads, payments, submissions and CRM activity — even when this tab is in the background</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {/* Toggle Row */}
+          <div className="flex items-center justify-between p-4 rounded-xl border border-orange-100 bg-gradient-to-r from-orange-50/60 to-amber-50/60">
+            <div>
+              <div className="font-semibold text-slate-900 flex items-center gap-2">
+                <Bell className="w-4 h-4 text-orange-500" /> Enable CRM Notifications
+              </div>
+              <div className="text-xs text-slate-500 mt-0.5">Turn on to receive real-time browser alerts</div>
+            </div>
+            <div className="flex items-center gap-3">
+              <span className={`text-xs font-bold ${notifOn ? 'text-emerald-600' : 'text-slate-400'}`}>{notifOn ? 'ON' : 'OFF'}</span>
+              <Switch checked={notifOn && permission === 'granted'} onCheckedChange={toggleNotifs} className="data-[state=checked]:bg-orange-500" />
+            </div>
+          </div>
+
+          {/* Status pill */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <Badge className={`${permBadge.cls} border-0 gap-1.5`}><span className={`w-1.5 h-1.5 rounded-full ${permBadge.dot} inline-block`} /> {permBadge.text}</Badge>
+            {permission === 'granted' && notifOn && <Badge className="bg-orange-100 text-orange-700 border-0"><Zap className="w-3 h-3 mr-1" /> Live Alerts Active</Badge>}
+          </div>
+
+          {/* Help text based on state */}
+          {permission === 'denied' && (
+            <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg p-3">
+              <b>Browser is blocking notifications.</b> Click the padlock 🔒 in your address bar → Site settings → Notifications → Allow. Then reload this page.
+            </div>
+          )}
+          {permission === 'default' && (
+            <div className="text-xs text-slate-600 bg-slate-50 border rounded-lg p-3">Click the switch above to grant browser permission for the first time.</div>
+          )}
+
+          {/* Test Button */}
+          <div className="flex items-center gap-2 pt-1">
+            <Button onClick={testNotif} disabled={!notifOn || permission !== 'granted'} className="bg-orange-500 hover:bg-orange-600 text-white disabled:opacity-50">
+              <Bell className="w-4 h-4 mr-1" /> Send Test Notification
+            </Button>
+            <span className="text-xs text-slate-500">Fire a demo pop-up to verify it's working</span>
+          </div>
+
+          {/* What triggers alerts */}
+          <div className="text-xs text-slate-500 border-t pt-3">
+            <div className="font-semibold text-slate-700 mb-2">You'll be notified for:</div>
+            <div className="grid grid-cols-2 gap-1.5">
+              {['New lead added', 'Lead stage moved', 'Payment received', 'Fee installment paid', 'Student added', 'Assignment submitted', 'Assignment graded', 'Expense recorded', 'New batch created', 'Lesson completed'].map(x => (
+                <div key={x} className="flex items-center gap-1.5"><CheckCircle2 className="w-3 h-3 text-emerald-500" /> {x}</div>
+              ))}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
       <Card className="rounded-2xl border-0 shadow-sm"><CardHeader><CardTitle className="flex items-center gap-2"><Mail className="w-5 h-5 text-orange-500" /> Change Email</CardTitle></CardHeader><CardContent className="space-y-3"><Field label="New Email"><Input type="email" value={emailForm.newEmail} onChange={e => setEmailForm({...emailForm, newEmail: e.target.value})} /></Field><Field label="Current Password"><Input type="password" value={emailForm.password} onChange={e => setEmailForm({...emailForm, password: e.target.value})} /></Field><Button onClick={changeEmail} className="bg-orange-500 hover:bg-orange-600 text-white">Update</Button></CardContent></Card>
       <Card className="rounded-2xl border-0 shadow-sm"><CardHeader><CardTitle className="flex items-center gap-2"><KeyRound className="w-5 h-5 text-orange-500" /> Change Password</CardTitle></CardHeader><CardContent className="space-y-3"><Field label="Current Password"><Input type="password" value={pwForm.currentPassword} onChange={e => setPwForm({...pwForm, currentPassword: e.target.value})} /></Field><Field label="New Password"><Input type="password" value={pwForm.newPassword} onChange={e => setPwForm({...pwForm, newPassword: e.target.value})} /></Field><Field label="Confirm"><Input type="password" value={pwForm.confirm} onChange={e => setPwForm({...pwForm, confirm: e.target.value})} /></Field><Button onClick={changePw} className="bg-orange-500 hover:bg-orange-600 text-white">Update</Button></CardContent></Card>
     </div>
