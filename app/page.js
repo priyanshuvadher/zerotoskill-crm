@@ -704,6 +704,7 @@ function Admissions({ currentUser }) {
   const [stageFilter, setStageFilter] = useState('all');
   const [addOpen, setAddOpen] = useState(false);
   const [dragId, setDragId] = useState(null);
+  const [activeMonth, setActiveMonth] = useState('all'); // 'all' | 'YYYY-MM'
   const courses = useCourses();
 
   const load = async () => { try { const [l, f] = await Promise.all([api('/leads'), api('/leads/today-followups')]); setLeads(l.leads); setFollowups(f.followups); } catch (e) { toast.error(e.message); } };
@@ -712,12 +713,46 @@ function Admissions({ currentUser }) {
   const moveLead = async (id, status) => { setLeads(ls => ls.map(l => l.id === id ? { ...l, status } : l)); try { await api('/leads/status', { method: 'PATCH', body: JSON.stringify({ id, status }) }); notify('Lead moved', STAGES.find(s => s.key === status).label); } catch (e) { toast.error(e.message); load(); } };
   const del = async (id) => { if (!confirm('Delete this lead?')) return; await api(`/leads/${id}`, { method: 'DELETE' }); notify('Lead deleted'); load(); };
 
-  const filtered = leads.filter(l => { if (stageFilter !== 'all' && l.status !== stageFilter) return false; if (!search) return true; const q = search.toLowerCase(); return l.name?.toLowerCase().includes(q) || l.course?.toLowerCase().includes(q) || l.phone?.includes(search); });
+  // Group leads by month (YYYY-MM)
+  const getMonthKey = (l) => (l.createdAt || l.followupDate || new Date().toISOString()).slice(0, 7);
+  const monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+  const formatMonth = (key) => { const [y, m] = key.split('-'); return `${monthNames[Number(m) - 1]} ${y}`; };
+  const monthGroups = {};
+  for (const l of leads) { const mk = getMonthKey(l); if (!monthGroups[mk]) monthGroups[mk] = []; monthGroups[mk].push(l); }
+  const months = Object.entries(monthGroups).map(([key, ls]) => ({
+    key, label: formatMonth(key), count: ls.length,
+    confirmed: ls.filter(l => ['confirmed','fees_pending','onboarded'].includes(l.status)).length,
+    hot: ls.filter(l => ['counseling','fees_pending'].includes(l.status)).length,
+  })).sort((a, b) => b.key.localeCompare(a.key));
+
+  const filtered = leads.filter(l => {
+    if (activeMonth !== 'all' && activeMonth !== '__ALL__' && getMonthKey(l) !== activeMonth) return false;
+    if (stageFilter !== 'all' && l.status !== stageFilter) return false;
+    if (!search) return true;
+    const q = search.toLowerCase();
+    return l.name?.toLowerCase().includes(q) || l.course?.toLowerCase().includes(q) || l.phone?.includes(search);
+  });
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-3">
-        <div><h1 className="text-3xl font-bold">Admission CRM</h1><p className="text-slate-500">{filtered.length} of {leads.length} leads</p></div>
+        <div>
+          {activeMonth === '__ALL__' ? (
+            <>
+              <Button variant="ghost" size="sm" onClick={() => setActiveMonth('all')} className="mb-1 -ml-2"><ArrowLeft className="w-4 h-4 mr-1" /> Back to Monthly Folders</Button>
+              <h1 className="text-3xl font-bold flex items-center gap-2"><List className="w-7 h-7 text-orange-500" /> All Leads</h1>
+              <p className="text-slate-500 text-sm">{filtered.length} of {leads.length} leads · across all months</p>
+            </>
+          ) : activeMonth !== 'all' ? (
+            <>
+              <Button variant="ghost" size="sm" onClick={() => setActiveMonth('all')} className="mb-1 -ml-2"><ArrowLeft className="w-4 h-4 mr-1" /> Back to Monthly Folders</Button>
+              <h1 className="text-3xl font-bold flex items-center gap-2"><FolderOpen className="w-7 h-7 text-orange-500" /> {formatMonth(activeMonth)} · Leads</h1>
+              <p className="text-slate-500 text-sm">{filtered.length} leads in this month</p>
+            </>
+          ) : (
+            <><h1 className="text-3xl font-bold">Admission CRM</h1><p className="text-slate-500">{filtered.length} of {leads.length} leads · organised by month</p></>
+          )}
+        </div>
         <div className="flex items-center gap-2 flex-wrap">
           <div className="flex bg-white border rounded-full p-0.5">{[{k:'kanban',I:Kanban,L:'Kanban'},{k:'list',I:List,L:'List'},{k:'excel',I:Sheet,L:'Excel'}].map(v => (<button key={v.k} onClick={() => setView(v.k)} className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-medium ${view === v.k ? 'bg-orange-500 text-white' : 'text-slate-600 hover:bg-slate-100'}`}><v.I className="w-3.5 h-3.5" /> {v.L}</button>))}</div>
           <div className="relative"><Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" /><Input placeholder="Search..." className="pl-9 w-56 rounded-full bg-white" value={search} onChange={e => setSearch(e.target.value)} /></div>
@@ -726,7 +761,58 @@ function Admissions({ currentUser }) {
         </div>
       </div>
 
-      {followups.length > 0 && (
+      {/* Monthly Folders */}
+      {activeMonth === 'all' && (
+        <div>
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="font-bold text-lg flex items-center gap-2"><CalendarDays className="w-5 h-5 text-orange-500" /> Monthly Folders</h3>
+            <Badge className="bg-slate-900 text-white border-0">{months.length} months</Badge>
+          </div>
+          <div className="grid md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+            {/* All Leads tile */}
+            <button onClick={() => setActiveMonth('__ALL__')} className="text-left group">
+              <Card className="rounded-2xl border-0 shadow-sm hover:shadow-xl transition group-hover:-translate-y-1 overflow-hidden bg-gradient-to-br from-slate-900 to-slate-700 text-white">
+                <div className="h-24 relative">
+                  <List className="absolute right-4 bottom-4 w-16 h-16 text-white/20" />
+                  <div className="absolute top-4 left-4 text-white/80 text-xs font-semibold uppercase tracking-wider">All Leads · Everything</div>
+                </div>
+                <CardContent className="p-4">
+                  <div className="font-bold text-lg">Show All Leads</div>
+                  <div className="grid grid-cols-2 gap-2 mt-3 text-sm">
+                    <div><div className="text-xs text-white/60">Total</div><div className="font-bold text-white">{leads.length}</div></div>
+                    <div><div className="text-xs text-white/60">Confirmed</div><div className="font-bold text-emerald-300">{leads.filter(l => ['confirmed','fees_pending','onboarded'].includes(l.status)).length}</div></div>
+                  </div>
+                </CardContent>
+              </Card>
+            </button>
+
+            {months.map(m => (
+              <button key={m.key} onClick={() => setActiveMonth(m.key)} className="text-left group">
+                <Card className="rounded-2xl border-0 shadow-sm hover:shadow-xl transition group-hover:-translate-y-1 overflow-hidden">
+                  <div className="h-24 bg-gradient-to-br from-orange-400 to-red-500 relative">
+                    <Folder className="absolute right-4 bottom-4 w-16 h-16 text-white/20" />
+                    <div className="absolute top-4 left-4 text-white/90 text-xs font-semibold uppercase tracking-wider">{m.key}</div>
+                  </div>
+                  <CardContent className="p-4">
+                    <div className="font-bold text-lg">{m.label}</div>
+                    <div className="grid grid-cols-3 gap-2 mt-3 text-sm">
+                      <div><div className="text-xs text-slate-500">Total</div><div className="font-bold">{m.count}</div></div>
+                      <div><div className="text-xs text-slate-500">Hot</div><div className="font-bold text-amber-600">{m.hot}</div></div>
+                      <div><div className="text-xs text-slate-500">Won</div><div className="font-bold text-emerald-600">{m.confirmed}</div></div>
+                    </div>
+                  </CardContent>
+                </Card>
+              </button>
+            ))}
+
+            {!months.length && (
+              <div className="col-span-4 py-10 text-center text-slate-400"><CalendarDays className="w-12 h-12 mx-auto mb-2 opacity-30" />No leads yet. Add your first lead to see monthly folders here.</div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {activeMonth !== 'all' && followups.length > 0 && (
         <Card className="rounded-2xl border-0 shadow-sm bg-gradient-to-r from-orange-50 to-amber-50">
           <CardHeader className="pb-3"><CardTitle className="flex items-center gap-2 text-base"><Zap className="w-5 h-5 text-orange-500" /> Today's Follow-ups · {followups.length} pending</CardTitle><CardDescription>Reach out to these leads now — scheduled for today or earlier</CardDescription></CardHeader>
           <CardContent className="p-0">
@@ -745,7 +831,7 @@ function Admissions({ currentUser }) {
         </Card>
       )}
 
-      {view === 'kanban' && (
+      {view === 'kanban' && activeMonth !== 'all' && (
         <div className="overflow-x-auto pb-4"><div className="flex gap-4 min-w-max">
           {STAGES.map(stage => { const stageLeads = filtered.filter(l => l.status === stage.key); return (
             <div key={stage.key} onDragOver={e => e.preventDefault()} onDrop={() => { if (dragId) { moveLead(dragId, stage.key); setDragId(null); } }} className="w-80 flex-shrink-0">
@@ -767,7 +853,7 @@ function Admissions({ currentUser }) {
         </div></div>
       )}
 
-      {view === 'list' && (
+      {view === 'list' && activeMonth !== 'all' && (
         <div className="grid gap-3">
           {filtered.map(l => { const stage = STAGES.find(s => s.key === l.status); return (
             <Card key={l.id} className="rounded-2xl border-0 shadow-sm"><CardContent className="p-4 flex items-center gap-4 flex-wrap">
@@ -783,7 +869,7 @@ function Admissions({ currentUser }) {
         </div>
       )}
 
-      {view === 'excel' && (
+      {view === 'excel' && activeMonth !== 'all' && (
         <Card className="rounded-2xl border-0 shadow-sm"><CardContent className="p-0 overflow-x-auto"><table className="w-full text-xs border-collapse"><thead className="bg-slate-900 text-white"><tr>{['Name','Course','Source','Phone','City','Stage','Followup','Actions'].map(h => <th key={h} className="text-left px-3 py-2 font-semibold border border-slate-700">{h}</th>)}</tr></thead><tbody>{filtered.map((l, i) => { const stage = STAGES.find(s => s.key === l.status); return (<tr key={l.id} className={i % 2 === 0 ? 'bg-white' : 'bg-slate-50'}><td className="px-3 py-2 border font-medium">{l.name}</td><td className="px-3 py-2 border">{l.course}</td><td className="px-3 py-2 border">{l.source}</td><td className="px-3 py-2 border">{l.phone}</td><td className="px-3 py-2 border">{l.city || '—'}</td><td className="px-3 py-2 border"><Badge className={`${stage.chip} border-0 text-[10px]`}>{stage.label}</Badge></td><td className="px-3 py-2 border">{l.followupDate}</td><td className="px-3 py-2 border"><Select value={l.status} onValueChange={v => moveLead(l.id, v)}><SelectTrigger className="h-6 text-[10px] w-28"><SelectValue /></SelectTrigger><SelectContent>{STAGES.map(s => <SelectItem key={s.key} value={s.key} className="text-xs">{s.label}</SelectItem>)}</SelectContent></Select></td></tr>);})}</tbody></table></CardContent></Card>
       )}
     </div>
