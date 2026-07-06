@@ -131,11 +131,11 @@ function LoginScreen({ onLogin }) {
 // ---------------- SIDEBAR ----------------
 function Sidebar({ user, active, setActive, onLogout, open, setOpen, collapsed, setCollapsed }) {
   const roleItems = {
-    super_admin: ['dashboard', 'admissions', 'students', 'fees', 'faculty', 'batches', 'courses', 'lms', 'assignments', 'certificates', 'ai_doubts', 'users', 'community', 'settings'],
-    academic_manager: ['dashboard', 'students', 'batches', 'faculty', 'courses', 'lms', 'assignments', 'certificates', 'ai_doubts', 'community', 'settings'],
-    faculty: ['dashboard', 'students', 'batches', 'lms', 'assignments', 'ai_doubts', 'community', 'settings'],
+    super_admin: ['dashboard', 'admissions', 'students', 'fees', 'faculty', 'batches', 'courses', 'lms', 'assignments', 'users', 'community', 'settings'],
+    academic_manager: ['dashboard', 'students', 'batches', 'faculty', 'courses', 'lms', 'assignments', 'community', 'settings'],
+    faculty: ['dashboard', 'students', 'batches', 'lms', 'assignments', 'community', 'settings'],
     counselor: ['dashboard', 'admissions', 'students', 'fees', 'community', 'settings'],
-    student: ['dashboard', 'fees', 'lms', 'assignments', 'certificates', 'ai_doubts', 'community', 'settings'],
+    student: ['dashboard', 'fees', 'lms', 'assignments', 'community', 'settings'],
   };
   const items = [
     { key: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -147,8 +147,6 @@ function Sidebar({ user, active, setActive, onLogout, open, setOpen, collapsed, 
     { key: 'courses', label: 'Courses', icon: Library },
     { key: 'lms', label: 'LMS', icon: PlayCircle },
     { key: 'assignments', label: 'Assignments', icon: ClipboardList },
-    { key: 'certificates', label: 'Certificates', icon: Award },
-    { key: 'ai_doubts', label: 'AI Doubt Solver', icon: Sparkles },
     { key: 'users', label: 'User Management', icon: UserCog },
     { key: 'community', label: 'Community', icon: MessageSquare },
     { key: 'settings', label: 'Settings', icon: Settings },
@@ -1343,6 +1341,76 @@ function Assignments({ currentUser }) {
           <DialogFooter><Button variant="outline" onClick={() => setSubmitOpen(false)}>Cancel</Button><Button onClick={submitWork} className="bg-orange-500 hover:bg-orange-600 text-white">Submit</Button></DialogFooter>
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+// ---------------- FLEXIBLE INSTALLMENT EDITOR ----------------
+function FlexibleInstallmentEditor({ value, onChange, allowFullTotal = false }) {
+  const insts = value.customInstallments || [];
+  const total = insts.reduce((a, i) => a + (Number(i.amount) || 0), 0);
+  const use = value.useCustom;
+
+  const build = (n) => {
+    const t = Number(value.totalAmount) || 0;
+    const per = Math.floor(t / n);
+    const last = t - per * (n - 1);
+    const startDate = new Date();
+    const list = [];
+    for (let i = 0; i < n; i++) {
+      const d = new Date(startDate); d.setMonth(d.getMonth() + i);
+      list.push({ amount: i === n - 1 ? last : per, dueDate: d.toISOString().slice(0,10), label: n === 1 ? 'Full Payment' : `Installment ${i+1}` });
+    }
+    onChange({ ...value, useCustom: true, customInstallments: list, installmentCount: n });
+  };
+  const update = (i, key, v) => { const list = [...insts]; list[i] = { ...list[i], [key]: v }; onChange({ ...value, customInstallments: list, useCustom: true }); };
+  const remove = (i) => { const list = insts.filter((_, x) => x !== i); onChange({ ...value, customInstallments: list, useCustom: true }); };
+  const add = () => {
+    const last = insts[insts.length - 1];
+    const nextDate = last?.dueDate ? new Date(last.dueDate) : new Date();
+    nextDate.setMonth(nextDate.getMonth() + 1);
+    onChange({ ...value, useCustom: true, customInstallments: [...insts, { amount: 0, dueDate: nextDate.toISOString().slice(0,10), label: `Installment ${insts.length + 1}` }] });
+  };
+
+  return (
+    <div className="space-y-3 mt-3">
+      {allowFullTotal && (
+        <Field label="Total Course Fee (₹)" full>
+          <Input type="number" value={value.totalAmount} onChange={e => onChange({ ...value, totalAmount: Number(e.target.value) })} />
+        </Field>
+      )}
+
+      <div className="p-3 rounded-xl border-2 border-dashed border-orange-200 bg-orange-50/50">
+        <div className="text-xs font-bold text-orange-700 uppercase tracking-widest mb-2">Quick Preset · Auto-generate</div>
+        <div className="flex flex-wrap gap-2">
+          {[1,2,3,4,6,9,12].map(n => <button key={n} type="button" onClick={() => build(n)} className={`px-3 py-1.5 rounded-full text-xs font-semibold border-2 ${value.installmentCount === n && use ? 'border-orange-500 bg-orange-500 text-white' : 'border-slate-200 bg-white hover:border-orange-400'}`}>{n === 1 ? 'Full' : `${n} EMI`}</button>)}
+        </div>
+      </div>
+
+      <div>
+        <div className="flex items-center justify-between mb-2">
+          <div className="text-xs font-bold text-slate-700 uppercase tracking-widest">Installment Schedule ({insts.length})</div>
+          <div className="flex items-center gap-2">
+            <div className={`text-xs font-bold ${use ? 'text-orange-600' : 'text-slate-400'}`}>Total: {formatINR(total)}</div>
+            <Button size="sm" onClick={add} variant="outline" type="button"><Plus className="w-3 h-3 mr-1" /> Add</Button>
+          </div>
+        </div>
+        {!insts.length && <div className="text-center text-sm text-slate-400 py-6 border rounded-xl border-dashed">Select a preset above OR click "Add" to build a custom schedule</div>}
+        <div className="space-y-2 max-h-72 overflow-y-auto">
+          {insts.map((i, idx) => (
+            <div key={idx} className="flex items-center gap-2 p-2 rounded-xl border bg-white">
+              <div className="w-8 h-8 rounded-lg bg-orange-100 text-orange-700 flex items-center justify-center font-bold text-xs">{idx + 1}</div>
+              <Input value={i.label} onChange={e => update(idx, 'label', e.target.value)} placeholder="Label" className="w-32 h-8 text-xs" />
+              <Input type="date" value={i.dueDate} onChange={e => update(idx, 'dueDate', e.target.value)} className="w-36 h-8 text-xs" />
+              <div className="relative flex-1">
+                <span className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400 text-xs">₹</span>
+                <Input type="number" value={i.amount} onChange={e => update(idx, 'amount', Number(e.target.value))} placeholder="Amount" className="pl-6 h-8 font-semibold" />
+              </div>
+              <Button size="icon" variant="ghost" type="button" onClick={() => remove(idx)} className="h-8 w-8 text-red-500"><Trash2 className="w-3.5 h-3.5" /></Button>
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }

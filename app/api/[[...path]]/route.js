@@ -304,27 +304,6 @@ export async function GET(request, { params }) {
       return ok({ messages: msgs });
     }
 
-    // CERTIFICATES - list eligible students (fees paid + enrolled)
-    if (route === 'certificates/eligible') {
-      const students = await db.collection('users').find({ role: 'student' }, { projection: { _id: 0, password: 0, plainPassword: 0 } }).toArray();
-      const results = [];
-      for (const s of students) {
-        const fee = await db.collection('fees').findOne({ studentId: s.id });
-        const feesCleared = !fee || fee.status === 'paid';
-        results.push({ ...s, feesCleared, feeStatus: fee?.status || 'no_fee', eligible: feesCleared });
-      }
-      return ok({ students: results });
-    }
-
-    if (p[0] === 'certificates' && p[1]) {
-      const student = await db.collection('users').findOne({ id: p[1], role: 'student' }, { projection: { _id: 0, password: 0, plainPassword: 0 } });
-      if (!student) return err('Student not found', 404);
-      const certNo = 'ZTS-CERT-' + student.id.slice(0, 8).toUpperCase();
-      const issueDate = new Date().toISOString().slice(0, 10);
-      const verifyUrl = `${process.env.NEXT_PUBLIC_BASE_URL || ''}/verify/${certNo}`;
-      return ok({ certificate: { certNo, studentName: student.name, course: student.course, batch: student.batchName, mentor: student.mentorName, issueDate, verifyUrl, student } });
-    }
-
     return err('Not found', 404);
   } catch (e) {
     console.error('GET error', e);
@@ -618,53 +597,6 @@ export async function POST(request, { params }) {
       await db.collection('messages').insertOne(msg);
       const { _id, ...safe } = msg;
       return ok({ message: safe });
-    }
-
-    // AI DOUBT SOLVER (Emergent LLM)
-    if (route === 'ai/doubt') {
-      const me = await currentUser(request); if (!me) return err('Unauthorized', 401);
-      const { message, history = [], context = '' } = await request.json();
-      if (!message) return err('Message required');
-
-      const systemPrompt = `You are the Zero to Skill AI Mentor — a friendly, expert instructor at Zero to Skill Institute. You help students learn Digital Marketing With AI and Graphics Design With AI.
-
-Your specialties:
-- Digital Marketing (SEO, Social Media, Google Ads, Meta Ads, Analytics, Email Marketing)
-- Graphics Design (Photoshop, Illustrator, Figma, Canva, AI tools like Midjourney, DALL-E)
-- AI Tools (ChatGPT, Claude, AI image gen, prompt engineering)
-- Freelancing & Career Guidance
-- Portfolio building
-
-Style:
-- Be concise, practical, encouraging
-- Use real-world examples
-- Break down complex concepts step-by-step  
-- Suggest tools and next steps
-- Use emojis sparingly for warmth
-- If off-topic, gently redirect to their coursework
-- Keep answers under 250 words unless deep-dive needed
-
-Student context: ${me.name}${me.course ? ', enrolled in ' + me.course : ''}${me.batchName ? ', batch ' + me.batchName : ''}
-${context ? 'Additional context: ' + context : ''}`;
-
-      const messages = [
-        { role: 'system', content: systemPrompt },
-        ...(history || []).slice(-10).map(h => ({ role: h.role, content: h.content })),
-        { role: 'user', content: message },
-      ];
-
-      const reply = "AI Feature Disabled";
-
-await db.collection('doubts').insertOne({
-  id: uuidv4(),
-  userId: me.id,
-  userName: me.name,
-  question: message,
-  answer: reply,
-  createdAt: new Date()
-});
-
-return ok({ reply });
     }
 
     return err('Not found', 404);
