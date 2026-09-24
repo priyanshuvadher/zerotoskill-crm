@@ -203,6 +203,27 @@ export async function GET(request, { params }) {
       return ok({ expenses });
     }
 
+    // PAYMENT HISTORY (all fee collections)
+    if (route === 'payments') {
+      const me = await currentUser(request); if (!me) return err('Unauthorized', 401);
+      const payments = await db.collection('payments').find({}, { projection: { _id: 0 } }).sort({ paidAt: -1 }).toArray();
+      return ok({ payments });
+    }
+    if (route === 'payments/stats') {
+      const me = await currentUser(request); if (!me) return err('Unauthorized', 401);
+      const payments = await db.collection('payments').find({}).toArray();
+      const totalReceived = payments.reduce((a, p) => a + (Number(p.amount) || 0), 0);
+      const byMode = { cash: 0, upi: 0, bank_transfer: 0, card: 0, cheque: 0 };
+      for (const p of payments) { const m = p.method || 'cash'; byMode[m] = (byMode[m] || 0) + Number(p.amount || 0); }
+      let totalPaidOut = 0;
+      if (me.role === 'super_admin') {
+        const expenses = await db.collection('expenses').find({}).toArray();
+        totalPaidOut = expenses.reduce((a, e) => a + (Number(e.amount) || 0), 0);
+      }
+      const netBalance = totalReceived - totalPaidOut;
+      return ok({ totalReceived, totalPaidOut, netBalance, count: payments.length, byMode });
+    }
+
     if (route === 'expenses/stats') {
       const me = await currentUser(request); if (!me) return err('Unauthorized', 401);
       if (me.role !== 'super_admin') return err('Forbidden', 403);
@@ -498,7 +519,8 @@ export async function POST(request, { params }) {
     }
 
     if (route === 'fees/pay-installment') {
-      const { feeId, installmentIndex, method = 'cash' } = await request.json();
+      const me = await currentUser(request);
+      const { feeId, installmentIndex, method = 'cash', note = '', referenceNo = '', bankName = '' } = await request.json();
       const fee = await db.collection('fees').findOne({ id: feeId });
       if (!fee) return err('Fee not found', 404);
       if (!fee.installments?.[installmentIndex]) return err('Invalid installment');
@@ -509,7 +531,21 @@ export async function POST(request, { params }) {
       const updated = recomputeFee(fee);
       await db.collection('fees').updateOne({ id: feeId }, { $set: { installments: updated.installments, paidAmount: updated.paidAmount, pendingAmount: updated.pendingAmount, status: updated.status } });
       const receiptNo = 'ZTS-' + Date.now().toString().slice(-8);
-      await db.collection('payments').insertOne({ id: uuidv4(), feeId, studentId: fee.studentId, studentName: fee.studentName, amount: fee.installments[installmentIndex].amount, method, receiptNo, paidAt: new Date().toISOString(), installmentLabel: fee.installments[installmentIndex].label });
+      await db.collection('payments').insertOne({
+        id: uuidv4(),
+        feeId, studentId: fee.studentId, studentName: fee.studentName,
+        studentPhone: fee.studentPhone || '',
+        course: fee.course, batchName: fee.batchName || '',
+        amount: fee.installments[installmentIndex].amount,
+        method, // cash | upi | bank_transfer | card
+        note, referenceNo, bankName,
+        receiptNo,
+        installmentIndex,
+        installmentLabel: fee.installments[installmentIndex].label,
+        createdBy: me?.id || null,
+        createdByName: me?.name || 'Admin',
+        paidAt: new Date().toISOString(),
+      });
       return ok({ success: true, receiptNo, fee: { ...updated, _id: undefined } });
     }
 
@@ -752,6 +788,30 @@ export async function PATCH(request, { params }) {
       await db.collection('expenses').updateOne({ id: p[1] }, { $set: patch });
       return ok({ success: true });
     }
+    // UPDATE PAYMENT HISTORY
+    if (p[0] === 'payments' && p[1]) {
+      const me = await currentUser(request); if (!me) return err('Unauthorized', 401);
+      if (me.role !== 'super_admin' && me.role !== 'academic_manager' && me.role !== 'counselor') return err('Forbidden', 403);
+      const body = await request.json();
+      const patch = {};
+      ['amount','method','note','referenceNo','bankName','receiptNo','paidAt'].forEach(k => { if (body[k] !== undefined) patch[k] = k === 'amount' ? Number(body[k]) : body[k]; });
+      patch.updatedAt = new Date().toISOString();
+      await db.collection('payments').updateOne({ id: p[1] }, { $set: patch });
+      // Also update the linked installment amount/method if amount/method changed
+      if (patch.amount !== undefined || patch.method !== undefined) {
+        const payment = await db.collection('payments').findOne({ id: p[1] });
+        if (payment?.feeId) {
+          const fee = await db.collection('fees').findOne({ id: payment.feeId });
+          if (fee && Number.isInteger(payment.installmentIndex) && fee.installments?.[payment.installmentIndex]) {
+            if (patch.amount !== undefined) fee.installments[payment.installmentIndex].amount = patch.amount;
+            if (patch.method !== undefined) fee.installments[payment.installmentIndex].method = patch.method;
+            const recomputed = recomputeFee(fee);
+            await db.collection('fees').updateOne({ id: fee.id }, { $set: { installments: recomputed.installments, paidAmount: recomputed.paidAmount, pendingAmount: recomputed.pendingAmount, status: recomputed.status } });
+          }
+        }
+      }
+      return ok({ success: true });
+    }
     return err('Not found', 404);
   } catch (e) {
     console.error('PATCH error', e);
@@ -798,6 +858,24 @@ export async function DELETE(request, { params }) {
       const me = await currentUser(request); if (!me) return err('Unauthorized', 401);
       if (me.role !== 'super_admin') return err('Forbidden', 403);
       await db.collection('expenses').deleteOne({ id: p[1] });
+      return ok({ success: true });
+    }
+    // DELETE PAYMENT (Super Admin only - reverses the installment too)
+    if (p[0] === 'payments' && p[1]) {
+      const me = await currentUser(request); if (!me) return err('Unauthorized', 401);
+      if (me.role !== 'super_admin') return err('Forbidden', 403);
+      const payment = await db.collection('payments').findOne({ id: p[1] });
+      if (payment?.feeId) {
+        const fee = await db.collection('fees').findOne({ id: payment.feeId });
+        if (fee && Number.isInteger(payment.installmentIndex) && fee.installments?.[payment.installmentIndex]) {
+          fee.installments[payment.installmentIndex].paid = false;
+          delete fee.installments[payment.installmentIndex].paidDate;
+          delete fee.installments[payment.installmentIndex].method;
+          const recomputed = recomputeFee(fee);
+          await db.collection('fees').updateOne({ id: fee.id }, { $set: { installments: recomputed.installments, paidAmount: recomputed.paidAmount, pendingAmount: recomputed.pendingAmount, status: recomputed.status } });
+        }
+      }
+      await db.collection('payments').deleteOne({ id: p[1] });
       return ok({ success: true });
     }
     return err('Not found', 404);

@@ -138,10 +138,10 @@ function LoginScreen({ onLogin }) {
 // ---------------- SIDEBAR ----------------
 function Sidebar({ user, active, setActive, onLogout, open, setOpen, collapsed, setCollapsed }) {
   const roleItems = {
-    super_admin: ['dashboard', 'admissions', 'students', 'fees', 'faculty', 'batches', 'courses', 'lms', 'assignments', 'users', 'community', 'settings'],
+    super_admin: ['dashboard', 'admissions', 'students', 'fees', 'payments', 'faculty', 'batches', 'courses', 'lms', 'assignments', 'users', 'community', 'settings'],
     academic_manager: ['dashboard', 'students', 'batches', 'faculty', 'courses', 'lms', 'assignments', 'community', 'settings'],
     faculty: ['dashboard', 'students', 'batches', 'lms', 'assignments', 'community', 'settings'],
-    counselor: ['dashboard', 'admissions', 'students', 'fees', 'community', 'settings'],
+    counselor: ['dashboard', 'admissions', 'students', 'fees', 'payments', 'community', 'settings'],
     student: ['dashboard', 'fees', 'lms', 'assignments', 'community', 'settings'],
   };
   const items = [
@@ -149,6 +149,7 @@ function Sidebar({ user, active, setActive, onLogout, open, setOpen, collapsed, 
     { key: 'admissions', label: 'Admission CRM', icon: UserPlus },
     { key: 'students', label: 'Students', icon: GraduationCap },
     { key: 'fees', label: 'Fees & Finance', icon: IndianRupee },
+    { key: 'payments', label: 'Payment History', icon: Wallet },
     { key: 'faculty', label: 'Faculty', icon: Users },
     { key: 'batches', label: 'Batches', icon: BookOpen },
     { key: 'courses', label: 'Courses', icon: Library },
@@ -1083,6 +1084,8 @@ function Fees({ currentUser }) {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [receipt, setReceipt] = useState(null);
+  const [collectDlg, setCollectDlg] = useState(null); // { fee, idx }
+  const [collectForm, setCollectForm] = useState({ mode: 'cash', note: '', referenceNo: '', bankName: '' });
 
   const load = async () => {
     const [f, s, st, b] = await Promise.all([api('/fees'), api('/fees/stats'), api('/students'), api('/batches')]);
@@ -1090,14 +1093,22 @@ function Fees({ currentUser }) {
   };
   useEffect(() => { load(); }, []);
 
-  const payInstallment = async (fee, idx) => {
+  const openCollect = (fee, idx) => {
+    setCollectDlg({ fee, idx });
+    setCollectForm({ mode: 'cash', note: '', referenceNo: '', bankName: '' });
+  };
+  const confirmCollect = async () => {
+    if (!collectDlg) return;
+    const { fee, idx } = collectDlg;
     try {
-      const r = await api('/fees/pay-installment', { method: 'POST', body: JSON.stringify({ feeId: fee.id, installmentIndex: idx, method: 'cash' }) });
-      notify('Payment recorded', formatINR(fee.installments[idx].amount) + ' · ' + fee.studentName);
+      const r = await api('/fees/pay-installment', { method: 'POST', body: JSON.stringify({ feeId: fee.id, installmentIndex: idx, method: collectForm.mode, note: collectForm.note, referenceNo: collectForm.referenceNo, bankName: collectForm.bankName }) });
+      notify('Payment recorded', formatINR(fee.installments[idx].amount) + ' · ' + fee.studentName + ' · ' + collectForm.mode.toUpperCase());
       setDetail(r.fee); load();
-      setReceipt({ receiptNo: r.receiptNo, studentName: fee.studentName, course: fee.course, batchName: fee.batchName, paidAt: new Date().toISOString(), amount: fee.installments[idx].amount, installmentLabel: fee.installments[idx].label, method: 'cash' });
+      setReceipt({ receiptNo: r.receiptNo, studentName: fee.studentName, course: fee.course, batchName: fee.batchName, paidAt: new Date().toISOString(), amount: fee.installments[idx].amount, installmentLabel: fee.installments[idx].label, method: collectForm.mode });
+      setCollectDlg(null);
     } catch (e) { toast.error(e.message); }
   };
+  const payInstallment = openCollect; // legacy alias
 
   const addFee = async () => {
     if (!addForm.studentId) return toast.error('Select a student');
@@ -1224,7 +1235,264 @@ function Fees({ currentUser }) {
       </Dialog>
 
       <ReceiptView receipt={receipt} onClose={() => setReceipt(null)} />
+
+      {/* Collect Installment Dialog */}
+      <Dialog open={!!collectDlg} onOpenChange={(o) => !o && setCollectDlg(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><Wallet className="w-5 h-5 text-orange-500" /> Collect Payment</DialogTitle>
+            {collectDlg && <DialogDescription>{collectDlg.fee.studentName} · {collectDlg.fee.installments?.[collectDlg.idx]?.label} · <b className="text-slate-900">{formatINR(collectDlg.fee.installments?.[collectDlg.idx]?.amount || 0)}</b></DialogDescription>}
+          </DialogHeader>
+          <div className="space-y-3">
+            <div>
+              <Label className="text-xs font-bold uppercase text-slate-500">Payment Mode *</Label>
+              <div className="grid grid-cols-2 gap-2 mt-2">
+                {[
+                  { k: 'cash', label: 'Cash', icon: '💵', bg: 'from-emerald-500 to-teal-600' },
+                  { k: 'upi', label: 'UPI', icon: '📱', bg: 'from-violet-500 to-fuchsia-600' },
+                  { k: 'bank_transfer', label: 'Bank Transfer', icon: '🏦', bg: 'from-blue-500 to-cyan-600' },
+                  { k: 'card', label: 'Card', icon: '💳', bg: 'from-orange-500 to-red-600' },
+                ].map(m => (
+                  <button key={m.k} onClick={() => setCollectForm(f => ({ ...f, mode: m.k }))} className={`p-3 rounded-xl border-2 text-left transition ${collectForm.mode === m.k ? `bg-gradient-to-br ${m.bg} text-white border-transparent shadow-lg` : 'bg-white border-slate-200 hover:border-orange-300'}`}>
+                    <div className="text-2xl">{m.icon}</div>
+                    <div className="font-bold text-sm mt-1">{m.label}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+            {(collectForm.mode === 'upi' || collectForm.mode === 'bank_transfer' || collectForm.mode === 'card') && (
+              <>
+                <Field label="Reference / Txn ID"><Input placeholder="e.g. UPI ref 123456 / Cheque No" value={collectForm.referenceNo} onChange={e => setCollectForm(f => ({ ...f, referenceNo: e.target.value }))} /></Field>
+                {(collectForm.mode === 'bank_transfer') && <Field label="Bank Name"><Input placeholder="e.g. Axis Bank, HDFC" value={collectForm.bankName} onChange={e => setCollectForm(f => ({ ...f, bankName: e.target.value }))} /></Field>}
+              </>
+            )}
+            <Field label="Note (optional)"><Textarea rows={2} placeholder="Any remark about this payment…" value={collectForm.note} onChange={e => setCollectForm(f => ({ ...f, note: e.target.value }))} /></Field>
+          </div>
+          <DialogFooter><Button variant="outline" onClick={() => setCollectDlg(null)}>Cancel</Button><Button onClick={confirmCollect} className="bg-orange-500 hover:bg-orange-600 text-white"><CheckCircle2 className="w-4 h-4 mr-1" /> Confirm & Record</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
       </>}
+    </div>
+  );
+}
+
+// ---------------- PAYMENT HISTORY ----------------
+const METHOD_META = {
+  cash: { label: 'Cash', chip: 'bg-emerald-100 text-emerald-700', dot: 'bg-emerald-500' },
+  upi: { label: 'UPI', chip: 'bg-violet-100 text-violet-700', dot: 'bg-violet-500' },
+  bank_transfer: { label: 'Bank Transfer', chip: 'bg-blue-100 text-blue-700', dot: 'bg-blue-500' },
+  card: { label: 'Card', chip: 'bg-orange-100 text-orange-700', dot: 'bg-orange-500' },
+  cheque: { label: 'Cheque', chip: 'bg-slate-100 text-slate-700', dot: 'bg-slate-500' },
+};
+
+const PARTY_COLORS = ['bg-orange-400','bg-emerald-400','bg-violet-400','bg-blue-400','bg-pink-400','bg-amber-400','bg-cyan-400','bg-rose-400'];
+
+function PaymentHistory({ currentUser }) {
+  const [payments, setPayments] = useState([]);
+  const [stats, setStats] = useState(null);
+  const [search, setSearch] = useState('');
+  const [modeFilter, setModeFilter] = useState('all');
+  const [periodFilter, setPeriodFilter] = useState('all');
+  const [editing, setEditing] = useState(null);
+  const [form, setForm] = useState({});
+  const isSuper = currentUser?.role === 'super_admin';
+
+  const load = async () => {
+    try {
+      const [p, s] = await Promise.all([api('/payments'), api('/payments/stats')]);
+      setPayments(p.payments || []); setStats(s);
+    } catch (e) { toast.error(e.message); }
+  };
+  useEffect(() => { load(); }, []);
+
+  const openEdit = (p) => {
+    setEditing(p);
+    setForm({ amount: String(p.amount), method: p.method || 'cash', note: p.note || '', referenceNo: p.referenceNo || '', bankName: p.bankName || '', receiptNo: p.receiptNo || '', paidAt: p.paidAt?.slice(0, 10) || new Date().toISOString().slice(0, 10) });
+  };
+  const saveEdit = async () => {
+    try {
+      await api(`/payments/${editing.id}`, { method: 'PATCH', body: JSON.stringify({ ...form, amount: Number(form.amount), paidAt: form.paidAt ? new Date(form.paidAt).toISOString() : editing.paidAt }) });
+      notify('Payment updated', `${editing.studentName} · ${formatINR(Number(form.amount))}`);
+      setEditing(null); load();
+    } catch (e) { toast.error(e.message); }
+  };
+  const del = async (p) => {
+    if (!confirm(`Delete this ${METHOD_META[p.method]?.label || p.method} payment of ${formatINR(p.amount)} from ${p.studentName}? The installment will be marked unpaid again.`)) return;
+    try { await api(`/payments/${p.id}`, { method: 'DELETE' }); notify('Payment removed', 'Installment reverted to pending'); load(); } catch (e) { toast.error(e.message); }
+  };
+
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  const currentMonth = now.getMonth();
+
+  const filtered = payments.filter(p => {
+    if (modeFilter !== 'all' && p.method !== modeFilter) return false;
+    const d = new Date(p.paidAt);
+    if (periodFilter === 'this_year' && d.getFullYear() !== currentYear) return false;
+    if (periodFilter === 'this_month' && (d.getFullYear() !== currentYear || d.getMonth() !== currentMonth)) return false;
+    if (periodFilter === 'last_month') {
+      const lmDate = new Date(currentYear, currentMonth - 1, 1);
+      if (d.getFullYear() !== lmDate.getFullYear() || d.getMonth() !== lmDate.getMonth()) return false;
+    }
+    if (!search) return true;
+    const q = search.toLowerCase();
+    return (p.studentName || '').toLowerCase().includes(q)
+      || (p.studentPhone || '').includes(search)
+      || (p.receiptNo || '').toLowerCase().includes(q)
+      || (p.referenceNo || '').toLowerCase().includes(q)
+      || String(p.amount).includes(search)
+      || (p.installmentLabel || '').toLowerCase().includes(q);
+  });
+
+  const filteredReceived = filtered.reduce((a, p) => a + (Number(p.amount) || 0), 0);
+  const totalReceived = stats?.totalReceived || 0;
+  const totalPaidOut = stats?.totalPaidOut || 0;
+  const netBalance = stats?.netBalance || 0;
+
+  const fmtDate = (iso) => { if (!iso) return '—'; const d = new Date(iso); return d.toLocaleDateString('en-GB').replace(/\//g, '-'); };
+  const fmtTime = (iso) => { if (!iso) return ''; const d = new Date(iso); const day = d.toLocaleDateString('en-US', { weekday: 'short' }); return `${day} ${d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}`; };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div>
+          <h1 className="text-3xl font-bold flex items-center gap-2"><Wallet className="w-8 h-8 text-orange-500" /> Payment History</h1>
+          <p className="text-slate-500 text-sm">Every fee collection, cash or online — searchable, filterable, editable</p>
+        </div>
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="relative"><Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" /><Input placeholder="Search payment, party name, amount…" className="pl-9 w-72 rounded-full bg-white" value={search} onChange={e => setSearch(e.target.value)} /></div>
+          <Select value={periodFilter} onValueChange={setPeriodFilter}><SelectTrigger className="w-36 rounded-full bg-white"><SelectValue /></SelectTrigger><SelectContent>
+            <SelectItem value="all">All Time</SelectItem>
+            <SelectItem value="this_year">This Year</SelectItem>
+            <SelectItem value="this_month">This Month</SelectItem>
+            <SelectItem value="last_month">Last Month</SelectItem>
+          </SelectContent></Select>
+          <Select value={modeFilter} onValueChange={setModeFilter}><SelectTrigger className="w-32 rounded-full bg-white"><SelectValue /></SelectTrigger><SelectContent>
+            <SelectItem value="all">All Modes</SelectItem>
+            <SelectItem value="cash">Cash</SelectItem>
+            <SelectItem value="upi">UPI</SelectItem>
+            <SelectItem value="bank_transfer">Bank Transfer</SelectItem>
+            <SelectItem value="card">Card</SelectItem>
+          </SelectContent></Select>
+        </div>
+      </div>
+
+      {/* Payment Table */}
+      <Card className="rounded-2xl border-0 shadow-sm overflow-hidden">
+        <CardContent className="p-0 overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-slate-50 border-b">
+              <tr className="text-slate-500 text-xs uppercase">
+                <th className="text-left px-6 py-3 font-semibold">Amount</th>
+                <th className="text-left px-4 py-3 font-semibold">Mode</th>
+                <th className="text-left px-4 py-3 font-semibold">Linked Documents</th>
+                <th className="text-left px-4 py-3 font-semibold">Party Name</th>
+                <th className="text-left px-4 py-3 font-semibold">Date / Created Time</th>
+                <th className="text-left px-4 py-3 font-semibold">Bank Details</th>
+                <th className="text-left px-4 py-3 font-semibold">Created By</th>
+                <th className="text-right px-4 py-3 font-semibold w-24">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((p, i) => {
+                const meta = METHOD_META[p.method] || METHOD_META.cash;
+                const color = PARTY_COLORS[(p.studentName || 'A').charCodeAt(0) % PARTY_COLORS.length];
+                return (
+                  <tr key={p.id} className="border-b hover:bg-orange-50/40 transition cursor-pointer" onClick={() => openEdit(p)}>
+                    <td className="px-6 py-4">
+                      <div className="font-bold text-lg text-slate-900">₹{Number(p.amount).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                    </td>
+                    <td className="px-4 py-4"><Badge className={`${meta.chip} border-0 font-bold`}>{meta.label}</Badge></td>
+                    <td className="px-4 py-4"><div className="text-sm font-semibold text-slate-700">{p.receiptNo || '—'}</div>{p.installmentLabel && <div className="text-xs text-slate-500">{p.installmentLabel}</div>}</td>
+                    <td className="px-4 py-4">
+                      <div className="flex items-center gap-2.5">
+                        <div className={`w-9 h-9 rounded-full ${color} text-white flex items-center justify-center text-xs font-bold shadow`}>{initials(p.studentName)}</div>
+                        <div><div className="font-semibold text-slate-900">{p.studentName}</div><div className="text-xs text-slate-500">{p.studentPhone || p.course}</div></div>
+                      </div>
+                    </td>
+                    <td className="px-4 py-4"><div className="font-medium text-slate-800">{fmtDate(p.paidAt)}</div><div className="text-xs text-slate-500">{fmtTime(p.paidAt)}</div></td>
+                    <td className="px-4 py-4">
+                      {p.method === 'cash' ? <div className="text-slate-700 font-medium">Cash</div> : (
+                        <><div className="font-medium text-slate-800">{p.bankName || (p.method === 'upi' ? 'UPI Payment' : '—')}</div>{p.referenceNo && <div className="text-xs text-slate-500">Ref: {p.referenceNo}</div>}</>
+                      )}
+                    </td>
+                    <td className="px-4 py-4"><div className="text-slate-700 font-medium">{p.createdByName || 'Admin'}</div></td>
+                    <td className="px-4 py-4 text-right" onClick={e => e.stopPropagation()}>
+                      <div className="flex justify-end gap-1"><button onClick={() => openEdit(p)} className="text-orange-600 hover:bg-orange-100 rounded p-1.5"><Edit3 className="w-4 h-4" /></button>{isSuper && <button onClick={() => del(p)} className="text-red-500 hover:bg-red-50 rounded p-1.5"><Trash2 className="w-4 h-4" /></button>}</div>
+                    </td>
+                  </tr>
+                );
+              })}
+              {!filtered.length && (
+                <tr><td colSpan={8} className="text-center py-16 text-slate-400"><Wallet className="w-16 h-16 mx-auto mb-2 opacity-30" /><div className="text-lg font-semibold">No payments recorded yet</div><div className="text-sm">Payments will appear here as soon as fees are collected in Fees & Finance.</div></td></tr>
+              )}
+            </tbody>
+          </table>
+        </CardContent>
+      </Card>
+
+      {/* Bottom Stats Bar */}
+      <Card className="rounded-2xl border-0 shadow-lg bg-white sticky bottom-4">
+        <CardContent className="p-4 flex items-center gap-6 flex-wrap">
+          <div className="flex items-center gap-2 px-4 py-2 rounded-full bg-slate-100">
+            <span className="text-xs font-semibold text-slate-600">Net Balance</span>
+            <span className={`font-bold text-lg ${netBalance >= 0 ? 'text-slate-900' : 'text-red-600'}`}>{formatINR(netBalance)}</span>
+          </div>
+          <div className="flex items-center gap-2 px-4 py-2 rounded-full bg-emerald-50">
+            <span className="text-xs font-semibold text-emerald-700">You Received:</span>
+            <span className="font-bold text-lg text-emerald-700">{formatINR(totalReceived)}</span>
+          </div>
+          {isSuper && (
+            <div className="flex items-center gap-2 px-4 py-2 rounded-full bg-orange-50">
+              <span className="text-xs font-semibold text-orange-700">You Gave:</span>
+              <span className="font-bold text-lg text-orange-700">{formatINR(totalPaidOut)}</span>
+            </div>
+          )}
+          <div className="text-sm text-slate-500 flex-1 text-right">
+            Showing <b className="text-slate-900">{filtered.length}</b> of {payments.length} · Filtered total: <b className="text-slate-900">{formatINR(filteredReceived)}</b>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Edit Payment Dialog */}
+      <Dialog open={!!editing} onOpenChange={(o) => !o && setEditing(null)}>
+        <DialogContent className="max-w-lg max-h-[92vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><Edit3 className="w-5 h-5 text-orange-500" /> Edit Payment</DialogTitle>
+            {editing && <DialogDescription>{editing.studentName} · {editing.installmentLabel} · Receipt {editing.receiptNo}</DialogDescription>}
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Amount (₹) *"><Input type="number" min="0" value={form.amount || ''} onChange={e => setForm(f => ({ ...f, amount: e.target.value }))} /></Field>
+              <Field label="Date"><Input type="date" value={form.paidAt || ''} onChange={e => setForm(f => ({ ...f, paidAt: e.target.value }))} /></Field>
+            </div>
+            <div>
+              <Label className="text-xs font-bold uppercase text-slate-500">Payment Mode *</Label>
+              <div className="grid grid-cols-4 gap-2 mt-2">
+                {[{k:'cash',i:'💵'},{k:'upi',i:'📱'},{k:'bank_transfer',i:'🏦'},{k:'card',i:'💳'}].map(m => (
+                  <button key={m.k} type="button" onClick={() => setForm(f => ({ ...f, method: m.k }))} className={`p-2 rounded-lg border-2 text-center transition ${form.method === m.k ? 'bg-orange-500 text-white border-transparent shadow' : 'bg-white border-slate-200 hover:border-orange-300'}`}>
+                    <div className="text-lg">{m.i}</div>
+                    <div className="text-[10px] font-bold uppercase">{METHOD_META[m.k]?.label || m.k}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+            {(form.method === 'upi' || form.method === 'bank_transfer' || form.method === 'card') && (
+              <>
+                <Field label="Reference / Txn ID"><Input value={form.referenceNo || ''} onChange={e => setForm(f => ({ ...f, referenceNo: e.target.value }))} /></Field>
+                {form.method === 'bank_transfer' && <Field label="Bank Name"><Input value={form.bankName || ''} onChange={e => setForm(f => ({ ...f, bankName: e.target.value }))} /></Field>}
+              </>
+            )}
+            <Field label="Receipt No"><Input value={form.receiptNo || ''} onChange={e => setForm(f => ({ ...f, receiptNo: e.target.value }))} /></Field>
+            <Field label="Note"><Textarea rows={2} value={form.note || ''} onChange={e => setForm(f => ({ ...f, note: e.target.value }))} /></Field>
+          </div>
+          <DialogFooter>
+            {isSuper && <Button variant="outline" onClick={() => { setEditing(null); del(editing); }} className="text-red-600 border-red-200 mr-auto"><Trash2 className="w-4 h-4 mr-1" /> Delete</Button>}
+            <Button variant="outline" onClick={() => setEditing(null)}>Cancel</Button>
+            <Button onClick={saveEdit} className="bg-orange-500 hover:bg-orange-600 text-white"><CheckCircle2 className="w-4 h-4 mr-1" /> Save Changes</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -2192,6 +2460,7 @@ function App() {
             {active === 'admissions' && <Admissions currentUser={user} />}
             {active === 'students' && <Students currentUser={user} />}
             {active === 'fees' && <Fees currentUser={user} />}
+            {active === 'payments' && <PaymentHistory currentUser={user} />}
             {active === 'faculty' && <Faculty />}
             {active === 'batches' && <Batches />}
             {active === 'courses' && <Courses currentUser={user} />}
