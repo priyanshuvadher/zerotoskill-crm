@@ -1078,7 +1078,7 @@ function Fees({ currentUser }) {
   const [openBatchId, setOpenBatchId] = useState(null);
   const [detail, setDetail] = useState(null);
   const [addOpen, setAddOpen] = useState(false);
-  const [addForm, setAddForm] = useState({ studentId: '', totalAmount: 45000, installmentCount: 3, customInstallments: [], useCustom: false });
+  const [addForm, setAddForm] = useState({ studentId: '', totalAmount: 45000, installmentCount: 3, customInstallments: [], useCustom: false, recordInitialPayment: false, initialAmount: '', initialMode: 'cash', initialReferenceNo: '', initialBankName: '', initialNote: '' });
   const [editOpen, setEditOpen] = useState(false);
   const [editForm, setEditForm] = useState({ totalAmount: 0, installmentCount: 3, customInstallments: [], useCustom: false });
   const [search, setSearch] = useState('');
@@ -1115,7 +1115,23 @@ function Fees({ currentUser }) {
     const body = { studentId: addForm.studentId };
     if (addForm.useCustom && addForm.customInstallments?.length) body.customInstallments = addForm.customInstallments;
     else { body.totalAmount = addForm.totalAmount; body.installmentCount = addForm.installmentCount; }
-    try { await api('/fees', { method: 'POST', body: JSON.stringify(body) }); notify('Fee created'); setAddOpen(false); load(); } catch (e) { toast.error(e.message); }
+    if (addForm.recordInitialPayment && Number(addForm.initialAmount) > 0) {
+      body.initialPayment = {
+        amount: Number(addForm.initialAmount),
+        mode: addForm.initialMode,
+        referenceNo: addForm.initialReferenceNo,
+        bankName: addForm.initialBankName,
+        note: addForm.initialNote,
+      };
+    }
+    try {
+      const r = await api('/fees', { method: 'POST', body: JSON.stringify(body) });
+      const paid = r.initialReceipts?.length || 0;
+      notify('Fee created', paid ? `${paid} payment(s) recorded via ${addForm.initialMode.toUpperCase()}` : 'Pending collection');
+      setAddOpen(false);
+      setAddForm(f => ({ ...f, studentId: '', recordInitialPayment: false, initialAmount: '', initialReferenceNo: '', initialBankName: '', initialNote: '' }));
+      load();
+    } catch (e) { toast.error(e.message); }
   };
   const saveEdit = async () => {
     const body = editForm.useCustom && editForm.customInstallments?.length
@@ -1225,12 +1241,51 @@ function Fees({ currentUser }) {
       </Dialog>
 
       <Dialog open={addOpen} onOpenChange={setAddOpen}>
-        <DialogContent className="max-w-2xl max-h-[92vh] overflow-y-auto"><DialogHeader><DialogTitle>Create Fee Record</DialogTitle></DialogHeader>
+        <DialogContent className="max-w-2xl max-h-[92vh] overflow-y-auto"><DialogHeader><DialogTitle className="flex items-center gap-2"><IndianRupee className="w-5 h-5 text-orange-500" /> Create Fee Record</DialogTitle><DialogDescription>Set total, split into installments, and optionally record the first payment right away</DialogDescription></DialogHeader>
           <div className="space-y-3">
             <Field label="Student" full><Select value={addForm.studentId} onValueChange={v => { setAddForm(f => ({...f, studentId: v })); }}><SelectTrigger><SelectValue placeholder="Choose student" /></SelectTrigger><SelectContent>{students.map(s => <SelectItem key={s.id} value={s.id}>{s.name} · {s.course}</SelectItem>)}</SelectContent></Select></Field>
           </div>
           <FlexibleInstallmentEditor value={addForm} onChange={setAddForm} allowFullTotal />
-          <DialogFooter><Button variant="outline" onClick={() => setAddOpen(false)}>Cancel</Button><Button onClick={addFee} className="bg-orange-500 hover:bg-orange-600 text-white">Create</Button></DialogFooter>
+
+          {/* INITIAL PAYMENT SECTION */}
+          <div className="mt-4 rounded-xl border-2 border-dashed border-orange-200 bg-gradient-to-br from-orange-50/50 to-white p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="font-bold text-slate-900 flex items-center gap-2"><Wallet className="w-4 h-4 text-orange-500" /> Record Initial Payment Now?</div>
+                <div className="text-xs text-slate-500 mt-0.5">If the student is paying today, capture it here — it will auto-log to Payment History</div>
+              </div>
+              <Switch checked={addForm.recordInitialPayment} onCheckedChange={v => setAddForm(f => ({ ...f, recordInitialPayment: v }))} className="data-[state=checked]:bg-orange-500" />
+            </div>
+
+            {addForm.recordInitialPayment && (
+              <>
+                <div className="grid grid-cols-2 gap-3">
+                  <Field label="Amount Being Paid Now (₹) *">
+                    <div className="flex gap-1">
+                      <Input type="number" min="0" placeholder="e.g. 15000" value={addForm.initialAmount} onChange={e => setAddForm(f => ({ ...f, initialAmount: e.target.value }))} />
+                      <Button type="button" variant="outline" onClick={() => { const total = addForm.useCustom ? (addForm.customInstallments || []).reduce((a,i)=>a+Number(i.amount||0),0) : Number(addForm.totalAmount)||0; setAddForm(f => ({ ...f, initialAmount: String(total) })); }} className="whitespace-nowrap text-xs">Full ₹</Button>
+                    </div>
+                  </Field>
+                  <Field label="Payment Mode *"><Select value={addForm.initialMode} onValueChange={v => setAddForm(f => ({ ...f, initialMode: v }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>
+                    <SelectItem value="cash">💵 Cash</SelectItem>
+                    <SelectItem value="upi">📱 UPI</SelectItem>
+                    <SelectItem value="bank_transfer">🏦 Bank Transfer</SelectItem>
+                    <SelectItem value="card">💳 Card</SelectItem>
+                  </SelectContent></Select></Field>
+                </div>
+                {(addForm.initialMode === 'upi' || addForm.initialMode === 'bank_transfer' || addForm.initialMode === 'card') && (
+                  <div className="grid grid-cols-2 gap-3">
+                    <Field label="Reference / Txn ID"><Input placeholder="e.g. UPI ref 123456" value={addForm.initialReferenceNo} onChange={e => setAddForm(f => ({ ...f, initialReferenceNo: e.target.value }))} /></Field>
+                    {addForm.initialMode === 'bank_transfer' && <Field label="Bank Name"><Input placeholder="e.g. Axis Bank" value={addForm.initialBankName} onChange={e => setAddForm(f => ({ ...f, initialBankName: e.target.value }))} /></Field>}
+                  </div>
+                )}
+                <Field label="Note (optional)" full><Input placeholder="Any remark about this initial payment…" value={addForm.initialNote} onChange={e => setAddForm(f => ({ ...f, initialNote: e.target.value }))} /></Field>
+                <div className="text-[11px] text-orange-700 bg-orange-100 border border-orange-200 rounded-lg p-2 flex gap-2"><CheckCircle2 className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" /> Installments will be marked paid one-by-one until this amount is used up. Excess will split the next installment into paid + balance.</div>
+              </>
+            )}
+          </div>
+
+          <DialogFooter><Button variant="outline" onClick={() => setAddOpen(false)}>Cancel</Button><Button onClick={addFee} className="bg-orange-500 hover:bg-orange-600 text-white"><CheckCircle2 className="w-4 h-4 mr-1" /> Create Fee{addForm.recordInitialPayment && Number(addForm.initialAmount) > 0 ? ' & Record Payment' : ''}</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 
@@ -1283,6 +1338,7 @@ const METHOD_META = {
   bank_transfer: { label: 'Bank Transfer', chip: 'bg-blue-100 text-blue-700', dot: 'bg-blue-500' },
   card: { label: 'Card', chip: 'bg-orange-100 text-orange-700', dot: 'bg-orange-500' },
   cheque: { label: 'Cheque', chip: 'bg-slate-100 text-slate-700', dot: 'bg-slate-500' },
+  pending: { label: 'Pending', chip: 'bg-red-100 text-red-700', dot: 'bg-red-500' },
 };
 
 const PARTY_COLORS = ['bg-orange-400','bg-emerald-400','bg-violet-400','bg-blue-400','bg-pink-400','bg-amber-400','bg-cyan-400','bg-rose-400'];
@@ -1293,14 +1349,34 @@ function PaymentHistory({ currentUser }) {
   const [search, setSearch] = useState('');
   const [modeFilter, setModeFilter] = useState('all');
   const [periodFilter, setPeriodFilter] = useState('all');
+  const [customRange, setCustomRange] = useState({ from: '', to: '' });
+  const [statusFilter, setStatusFilter] = useState('paid'); // 'paid' (all payments) | 'pending' (show unpaid installments too)
+  const [pendingInstallments, setPendingInstallments] = useState([]);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState({});
   const isSuper = currentUser?.role === 'super_admin';
 
   const load = async () => {
     try {
-      const [p, s] = await Promise.all([api('/payments'), api('/payments/stats')]);
+      const [p, s, f] = await Promise.all([api('/payments'), api('/payments/stats'), api('/fees')]);
       setPayments(p.payments || []); setStats(s);
+      // Build a list of pending installment rows so admins can see who owes
+      const pend = [];
+      for (const fee of f.fees || []) {
+        (fee.installments || []).forEach((inst, idx) => {
+          if (!inst.paid) {
+            pend.push({
+              id: `pending-${fee.id}-${idx}`,
+              feeId: fee.id, studentId: fee.studentId, studentName: fee.studentName,
+              studentPhone: fee.studentPhone || '', course: fee.course, batchName: fee.batchName || '',
+              amount: inst.amount, method: 'pending', installmentIndex: idx, installmentLabel: inst.label,
+              dueDate: inst.dueDate, paidAt: inst.dueDate ? new Date(inst.dueDate).toISOString() : new Date().toISOString(),
+              _pending: true,
+            });
+          }
+        });
+      }
+      setPendingInstallments(pend);
     } catch (e) { toast.error(e.message); }
   };
   useEffect(() => { load(); }, []);
@@ -1324,16 +1400,30 @@ function PaymentHistory({ currentUser }) {
   const now = new Date();
   const currentYear = now.getFullYear();
   const currentMonth = now.getMonth();
+  const todayStr = now.toISOString().slice(0, 10);
 
-  const filtered = payments.filter(p => {
-    if (modeFilter !== 'all' && p.method !== modeFilter) return false;
-    const d = new Date(p.paidAt);
-    if (periodFilter === 'this_year' && d.getFullYear() !== currentYear) return false;
-    if (periodFilter === 'this_month' && (d.getFullYear() !== currentYear || d.getMonth() !== currentMonth)) return false;
-    if (periodFilter === 'last_month') {
-      const lmDate = new Date(currentYear, currentMonth - 1, 1);
-      if (d.getFullYear() !== lmDate.getFullYear() || d.getMonth() !== lmDate.getMonth()) return false;
+  const inPeriod = (isoDate) => {
+    const d = new Date(isoDate);
+    if (periodFilter === 'today') return d.toISOString().slice(0, 10) === todayStr;
+    if (periodFilter === 'this_month') return d.getFullYear() === currentYear && d.getMonth() === currentMonth;
+    if (periodFilter === 'last_month') { const lm = new Date(currentYear, currentMonth - 1, 1); return d.getFullYear() === lm.getFullYear() && d.getMonth() === lm.getMonth(); }
+    if (periodFilter === 'this_year') return d.getFullYear() === currentYear;
+    if (periodFilter === 'last_6_months') { const cutoff = new Date(); cutoff.setMonth(cutoff.getMonth() - 6); return d >= cutoff; }
+    if (periodFilter === 'last_1_year') { const cutoff = new Date(); cutoff.setFullYear(cutoff.getFullYear() - 1); return d >= cutoff; }
+    if (periodFilter === 'custom') {
+      if (customRange.from && d < new Date(customRange.from)) return false;
+      if (customRange.to && d > new Date(customRange.to + 'T23:59:59')) return false;
+      return true;
     }
+    return true; // 'all'
+  };
+
+  // Combine paid payments + optionally pending installments
+  const combined = statusFilter === 'pending' ? pendingInstallments : statusFilter === 'all' ? [...payments, ...pendingInstallments] : payments;
+
+  const filtered = combined.filter(p => {
+    if (modeFilter !== 'all' && p.method !== modeFilter) return false;
+    if (!inPeriod(p.paidAt)) return false;
     if (!search) return true;
     const q = search.toLowerCase();
     return (p.studentName || '').toLowerCase().includes(q)
@@ -1361,11 +1451,15 @@ function PaymentHistory({ currentUser }) {
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <div className="relative"><Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" /><Input placeholder="Search payment, party name, amount…" className="pl-9 w-72 rounded-full bg-white" value={search} onChange={e => setSearch(e.target.value)} /></div>
-          <Select value={periodFilter} onValueChange={setPeriodFilter}><SelectTrigger className="w-36 rounded-full bg-white"><SelectValue /></SelectTrigger><SelectContent>
+          <Select value={periodFilter} onValueChange={setPeriodFilter}><SelectTrigger className="w-40 rounded-full bg-white"><SelectValue /></SelectTrigger><SelectContent>
             <SelectItem value="all">All Time</SelectItem>
-            <SelectItem value="this_year">This Year</SelectItem>
+            <SelectItem value="today">Today</SelectItem>
             <SelectItem value="this_month">This Month</SelectItem>
             <SelectItem value="last_month">Last Month</SelectItem>
+            <SelectItem value="last_6_months">Last 6 Months</SelectItem>
+            <SelectItem value="last_1_year">Last 1 Year</SelectItem>
+            <SelectItem value="this_year">This Year</SelectItem>
+            <SelectItem value="custom">Custom Range…</SelectItem>
           </SelectContent></Select>
           <Select value={modeFilter} onValueChange={setModeFilter}><SelectTrigger className="w-32 rounded-full bg-white"><SelectValue /></SelectTrigger><SelectContent>
             <SelectItem value="all">All Modes</SelectItem>
@@ -1375,6 +1469,30 @@ function PaymentHistory({ currentUser }) {
             <SelectItem value="card">Card</SelectItem>
           </SelectContent></Select>
         </div>
+      </div>
+
+      {/* Status pills: Paid / Pending / Both */}
+      <div className="flex items-center gap-2 flex-wrap">
+        <div className="inline-flex bg-slate-100 p-1 rounded-full">
+          {[
+            { k: 'paid', label: 'Paid Payments', dot: 'bg-emerald-500' },
+            { k: 'pending', label: 'Pending / Unpaid', dot: 'bg-red-500' },
+            { k: 'all', label: 'Show Both', dot: 'bg-orange-500' },
+          ].map(t => (
+            <button key={t.k} onClick={() => setStatusFilter(t.k)} className={`px-4 py-1.5 rounded-full text-xs font-semibold transition flex items-center gap-1.5 ${statusFilter === t.k ? 'bg-white shadow text-slate-900' : 'text-slate-600 hover:text-slate-900'}`}>
+              <span className={`w-1.5 h-1.5 rounded-full ${t.dot} inline-block`} /> {t.label}
+            </button>
+          ))}
+        </div>
+        {periodFilter === 'custom' && (
+          <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-white border">
+            <span className="text-xs text-slate-500">From</span>
+            <Input type="date" value={customRange.from} onChange={e => setCustomRange(r => ({ ...r, from: e.target.value }))} className="h-7 text-xs w-36" />
+            <span className="text-xs text-slate-500">To</span>
+            <Input type="date" value={customRange.to} onChange={e => setCustomRange(r => ({ ...r, to: e.target.value }))} className="h-7 text-xs w-36" />
+            {(customRange.from || customRange.to) && <button onClick={() => setCustomRange({ from: '', to: '' })} className="text-slate-400 hover:text-red-500"><X className="w-3.5 h-3.5" /></button>}
+          </div>
+        )}
       </div>
 
       {/* Payment Table */}
@@ -1397,28 +1515,35 @@ function PaymentHistory({ currentUser }) {
               {filtered.map((p, i) => {
                 const meta = METHOD_META[p.method] || METHOD_META.cash;
                 const color = PARTY_COLORS[(p.studentName || 'A').charCodeAt(0) % PARTY_COLORS.length];
+                const isPending = p._pending;
                 return (
-                  <tr key={p.id} className="border-b hover:bg-orange-50/40 transition cursor-pointer" onClick={() => openEdit(p)}>
+                  <tr key={p.id} className={`border-b transition ${isPending ? 'bg-red-50/40 hover:bg-red-50' : 'hover:bg-orange-50/40 cursor-pointer'}`} onClick={() => !isPending && openEdit(p)}>
                     <td className="px-6 py-4">
-                      <div className="font-bold text-lg text-slate-900">₹{Number(p.amount).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                      <div className={`font-bold text-lg ${isPending ? 'text-red-600' : 'text-slate-900'}`}>{isPending ? '' : ''}₹{Number(p.amount).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                      {isPending && <div className="text-[10px] text-red-500 font-bold uppercase">Due {p.dueDate || '—'}</div>}
                     </td>
                     <td className="px-4 py-4"><Badge className={`${meta.chip} border-0 font-bold`}>{meta.label}</Badge></td>
-                    <td className="px-4 py-4"><div className="text-sm font-semibold text-slate-700">{p.receiptNo || '—'}</div>{p.installmentLabel && <div className="text-xs text-slate-500">{p.installmentLabel}</div>}</td>
+                    <td className="px-4 py-4"><div className="text-sm font-semibold text-slate-700">{isPending ? <span className="text-red-500">— unpaid —</span> : (p.receiptNo || '—')}</div>{p.installmentLabel && <div className="text-xs text-slate-500">{p.installmentLabel}</div>}</td>
                     <td className="px-4 py-4">
                       <div className="flex items-center gap-2.5">
                         <div className={`w-9 h-9 rounded-full ${color} text-white flex items-center justify-center text-xs font-bold shadow`}>{initials(p.studentName)}</div>
                         <div><div className="font-semibold text-slate-900">{p.studentName}</div><div className="text-xs text-slate-500">{p.studentPhone || p.course}</div></div>
                       </div>
                     </td>
-                    <td className="px-4 py-4"><div className="font-medium text-slate-800">{fmtDate(p.paidAt)}</div><div className="text-xs text-slate-500">{fmtTime(p.paidAt)}</div></td>
+                    <td className="px-4 py-4"><div className="font-medium text-slate-800">{fmtDate(p.paidAt)}</div><div className="text-xs text-slate-500">{isPending ? 'Due date' : fmtTime(p.paidAt)}</div></td>
                     <td className="px-4 py-4">
-                      {p.method === 'cash' ? <div className="text-slate-700 font-medium">Cash</div> : (
+                      {isPending ? <div className="text-red-600 font-medium">Awaiting collection</div> :
+                       p.method === 'cash' ? <div className="text-slate-700 font-medium">Cash</div> : (
                         <><div className="font-medium text-slate-800">{p.bankName || (p.method === 'upi' ? 'UPI Payment' : '—')}</div>{p.referenceNo && <div className="text-xs text-slate-500">Ref: {p.referenceNo}</div>}</>
                       )}
                     </td>
-                    <td className="px-4 py-4"><div className="text-slate-700 font-medium">{p.createdByName || 'Admin'}</div></td>
+                    <td className="px-4 py-4"><div className="text-slate-700 font-medium">{p.createdByName || (isPending ? '—' : 'Admin')}</div></td>
                     <td className="px-4 py-4 text-right" onClick={e => e.stopPropagation()}>
-                      <div className="flex justify-end gap-1"><button onClick={() => openEdit(p)} className="text-orange-600 hover:bg-orange-100 rounded p-1.5"><Edit3 className="w-4 h-4" /></button>{isSuper && <button onClick={() => del(p)} className="text-red-500 hover:bg-red-50 rounded p-1.5"><Trash2 className="w-4 h-4" /></button>}</div>
+                      <div className="flex justify-end gap-1">
+                        {!isPending && <button onClick={() => openEdit(p)} className="text-orange-600 hover:bg-orange-100 rounded p-1.5"><Edit3 className="w-4 h-4" /></button>}
+                        {!isPending && isSuper && <button onClick={() => del(p)} className="text-red-500 hover:bg-red-50 rounded p-1.5"><Trash2 className="w-4 h-4" /></button>}
+                        {isPending && <Badge className="bg-red-500 text-white border-0 text-[10px]">PENDING</Badge>}
+                      </div>
                     </td>
                   </tr>
                 );

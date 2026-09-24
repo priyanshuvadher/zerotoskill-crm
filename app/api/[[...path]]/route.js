@@ -493,8 +493,9 @@ export async function POST(request, { params }) {
     }
 
     if (route === 'fees') {
+      const me = await currentUser(request);
       const body = await request.json();
-      const { studentId, totalAmount, installmentCount = 3, customInstallments } = body;
+      const { studentId, totalAmount, installmentCount = 3, customInstallments, initialPayment } = body;
       const student = await db.collection('users').findOne({ id: studentId });
       if (!student) return err('Student not found');
       let insts;
@@ -506,6 +507,7 @@ export async function POST(request, { params }) {
       const actualTotal = insts.reduce((a, i) => a + i.amount, 0);
       const fee = {
         id: uuidv4(), studentId, studentName: student.name, studentEmail: student.email,
+        studentPhone: student.phone || '',
         course: student.course, batchId: student.batchId, batchName: student.batchName,
         totalAmount: actualTotal, paidAmount: 0, pendingAmount: actualTotal,
         planType: insts.length === 1 ? 'full' : 'installment',
@@ -513,9 +515,61 @@ export async function POST(request, { params }) {
         status: 'pending', dueDate: insts[insts.length - 1].dueDate,
         installments: insts, createdAt: new Date().toISOString(),
       };
+
+      // OPTIONAL: record initial payment right away
+      let initialReceipts = [];
+      if (initialPayment && Number(initialPayment.amount) > 0) {
+        const { amount, mode = 'cash', note = '', referenceNo = '', bankName = '' } = initialPayment;
+        let remaining = Number(amount);
+        for (let i = 0; i < fee.installments.length && remaining > 0; i++) {
+          const inst = fee.installments[i];
+          if (inst.paid) continue;
+          if (remaining >= inst.amount) {
+            inst.paid = true;
+            inst.paidDate = new Date().toISOString().slice(0, 10);
+            inst.method = mode;
+            remaining -= inst.amount;
+            const receiptNo = 'ZTS-' + (Date.now() + i).toString().slice(-8);
+            initialReceipts.push({ receiptNo, amount: inst.amount, installmentLabel: inst.label });
+            await db.collection('payments').insertOne({
+              id: uuidv4(),
+              feeId: fee.id, studentId: fee.studentId, studentName: fee.studentName,
+              studentPhone: fee.studentPhone || '', course: fee.course, batchName: fee.batchName || '',
+              amount: inst.amount, method: mode, note, referenceNo, bankName,
+              receiptNo, installmentIndex: i, installmentLabel: inst.label,
+              createdBy: me?.id || null, createdByName: me?.name || 'Admin',
+              paidAt: new Date().toISOString(),
+            });
+          } else {
+            // Partial payment on this installment: split it into paid + remaining
+            const paidPart = { amount: remaining, dueDate: inst.dueDate, label: inst.label + ' (partial)', paid: true, paidDate: new Date().toISOString().slice(0, 10), method: mode };
+            const remainingPart = { amount: inst.amount - remaining, dueDate: inst.dueDate, label: inst.label + ' (balance)', paid: false, paidDate: null };
+            const receiptNo = 'ZTS-' + (Date.now() + i).toString().slice(-8);
+            initialReceipts.push({ receiptNo, amount: paidPart.amount, installmentLabel: paidPart.label });
+            fee.installments.splice(i, 1, paidPart, remainingPart);
+            await db.collection('payments').insertOne({
+              id: uuidv4(),
+              feeId: fee.id, studentId: fee.studentId, studentName: fee.studentName,
+              studentPhone: fee.studentPhone || '', course: fee.course, batchName: fee.batchName || '',
+              amount: paidPart.amount, method: mode, note, referenceNo, bankName,
+              receiptNo, installmentIndex: i, installmentLabel: paidPart.label,
+              createdBy: me?.id || null, createdByName: me?.name || 'Admin',
+              paidAt: new Date().toISOString(),
+            });
+            remaining = 0;
+          }
+        }
+        const recomputed = recomputeFee(fee);
+        fee.installments = recomputed.installments;
+        fee.paidAmount = recomputed.paidAmount;
+        fee.pendingAmount = recomputed.pendingAmount;
+        fee.status = recomputed.status;
+        fee.installmentCount = fee.installments.length;
+      }
+
       await db.collection('fees').insertOne(fee);
       const { _id, ...safe } = fee;
-      return ok({ fee: safe });
+      return ok({ fee: safe, initialReceipts });
     }
 
     if (route === 'fees/pay-installment') {
