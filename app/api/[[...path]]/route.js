@@ -214,14 +214,37 @@ export async function GET(request, { params }) {
       const payments = await db.collection('payments').find({}).toArray();
       const totalReceived = payments.reduce((a, p) => a + (Number(p.amount) || 0), 0);
       const byMode = { cash: 0, upi: 0, bank_transfer: 0, card: 0, cheque: 0 };
-      for (const p of payments) { const m = p.method || 'cash'; byMode[m] = (byMode[m] || 0) + Number(p.amount || 0); }
+      const byModeCount = { cash: 0, upi: 0, bank_transfer: 0, card: 0, cheque: 0 };
+      for (const p of payments) {
+        const m = p.method || 'cash';
+        byMode[m] = (byMode[m] || 0) + Number(p.amount || 0);
+        byModeCount[m] = (byModeCount[m] || 0) + 1;
+      }
       let totalPaidOut = 0;
       if (me.role === 'super_admin') {
         const expenses = await db.collection('expenses').find({}).toArray();
         totalPaidOut = expenses.reduce((a, e) => a + (Number(e.amount) || 0), 0);
       }
+      // TOTAL PENDING across all batches
+      const fees = await db.collection('fees').find({}).toArray();
+      const totalPending = fees.reduce((a, f) => a + (Number(f.pendingAmount) || 0), 0);
+      // Per-student summary
+      const studentSummary = {};
+      for (const f of fees) {
+        if (!f.studentId) continue;
+        if (!studentSummary[f.studentId]) studentSummary[f.studentId] = { studentName: f.studentName, studentPhone: f.studentPhone || '', course: f.course, batchName: f.batchName || '', total: 0, paid: 0, pending: 0 };
+        studentSummary[f.studentId].total += Number(f.totalAmount) || 0;
+        studentSummary[f.studentId].paid += Number(f.paidAmount) || 0;
+        studentSummary[f.studentId].pending += Number(f.pendingAmount) || 0;
+      }
+      // Pending by batch
+      const pendingByBatch = {};
+      for (const f of fees) {
+        const batch = f.batchName || 'Unassigned';
+        pendingByBatch[batch] = (pendingByBatch[batch] || 0) + (Number(f.pendingAmount) || 0);
+      }
       const netBalance = totalReceived - totalPaidOut;
-      return ok({ totalReceived, totalPaidOut, netBalance, count: payments.length, byMode });
+      return ok({ totalReceived, totalPaidOut, totalPending, netBalance, count: payments.length, byMode, byModeCount, studentSummary, pendingByBatch });
     }
 
     if (route === 'expenses/stats') {

@@ -1428,6 +1428,7 @@ function PaymentHistory({ currentUser }) {
   const [customRange, setCustomRange] = useState({ from: '', to: '' });
   const [statusFilter, setStatusFilter] = useState('paid'); // 'paid' (all payments) | 'pending' (show unpaid installments too)
   const [pendingInstallments, setPendingInstallments] = useState([]);
+  const [studentDrilldown, setStudentDrilldown] = useState(null);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState({});
   const isSuper = currentUser?.role === 'super_admin';
@@ -1547,6 +1548,88 @@ function PaymentHistory({ currentUser }) {
         </div>
       </div>
 
+      {/* KPI CARDS — Mode Breakdown + Pending */}
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+        <button onClick={() => setModeFilter('all')} className="text-left">
+          <Card className={`rounded-2xl border-0 shadow-sm hover:shadow-lg transition ${modeFilter === 'all' ? 'ring-2 ring-orange-500' : ''}`}>
+            <CardContent className="p-4 bg-gradient-to-br from-orange-500 to-red-500 text-white rounded-2xl">
+              <Wallet className="w-5 h-5 opacity-70" />
+              <div className="mt-2 text-xl font-black">{formatINR(totalReceived)}</div>
+              <div className="text-[11px] font-semibold uppercase tracking-wider opacity-80">Total Received</div>
+              <div className="text-[10px] mt-1 opacity-70">{stats?.count || 0} txns</div>
+            </CardContent>
+          </Card>
+        </button>
+        <button onClick={() => setModeFilter('cash')} className="text-left">
+          <Card className={`rounded-2xl border-0 border-l-4 border-l-emerald-500 shadow-sm hover:shadow-lg transition ${modeFilter === 'cash' ? 'ring-2 ring-emerald-500' : ''}`}>
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between"><span className="text-lg">💵</span><Badge className="bg-emerald-100 text-emerald-700 border-0 text-[10px]">CASH</Badge></div>
+              <div className="mt-2 text-xl font-black text-emerald-700">{formatINR(stats?.byMode?.cash || 0)}</div>
+              <div className="text-[11px] text-slate-500 font-semibold">Cash Received</div>
+              <div className="text-[10px] mt-1 text-slate-400">{stats?.byModeCount?.cash || 0} txns</div>
+            </CardContent>
+          </Card>
+        </button>
+        <button onClick={() => setModeFilter('upi')} className="text-left">
+          <Card className={`rounded-2xl border-0 border-l-4 border-l-violet-500 shadow-sm hover:shadow-lg transition ${modeFilter === 'upi' ? 'ring-2 ring-violet-500' : ''}`}>
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between"><span className="text-lg">📱</span><Badge className="bg-violet-100 text-violet-700 border-0 text-[10px]">UPI</Badge></div>
+              <div className="mt-2 text-xl font-black text-violet-700">{formatINR(stats?.byMode?.upi || 0)}</div>
+              <div className="text-[11px] text-slate-500 font-semibold">UPI Received</div>
+              <div className="text-[10px] mt-1 text-slate-400">{stats?.byModeCount?.upi || 0} txns</div>
+            </CardContent>
+          </Card>
+        </button>
+        <button onClick={() => setModeFilter('bank_transfer')} className="text-left">
+          <Card className={`rounded-2xl border-0 border-l-4 border-l-blue-500 shadow-sm hover:shadow-lg transition ${modeFilter === 'bank_transfer' ? 'ring-2 ring-blue-500' : ''}`}>
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between"><span className="text-lg">🏦</span><Badge className="bg-blue-100 text-blue-700 border-0 text-[10px]">BANK</Badge></div>
+              <div className="mt-2 text-xl font-black text-blue-700">{formatINR(stats?.byMode?.bank_transfer || 0)}</div>
+              <div className="text-[11px] text-slate-500 font-semibold">Bank Transfer</div>
+              <div className="text-[10px] mt-1 text-slate-400">{stats?.byModeCount?.bank_transfer || 0} txns</div>
+            </CardContent>
+          </Card>
+        </button>
+        <button onClick={() => setModeFilter('card')} className="text-left">
+          <Card className={`rounded-2xl border-0 border-l-4 border-l-amber-500 shadow-sm hover:shadow-lg transition ${modeFilter === 'card' ? 'ring-2 ring-amber-500' : ''}`}>
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between"><span className="text-lg">💳</span><Badge className="bg-amber-100 text-amber-700 border-0 text-[10px]">CARD</Badge></div>
+              <div className="mt-2 text-xl font-black text-amber-700">{formatINR(stats?.byMode?.card || 0)}</div>
+              <div className="text-[11px] text-slate-500 font-semibold">Card Payments</div>
+              <div className="text-[10px] mt-1 text-slate-400">{stats?.byModeCount?.card || 0} txns</div>
+            </CardContent>
+          </Card>
+        </button>
+        <button onClick={() => setStatusFilter('pending')} className="text-left">
+          <Card className={`rounded-2xl border-0 shadow-sm hover:shadow-lg transition ${statusFilter === 'pending' ? 'ring-2 ring-red-500' : ''}`}>
+            <CardContent className="p-4 bg-gradient-to-br from-red-500 to-rose-600 text-white rounded-2xl relative overflow-hidden">
+              <div className="absolute -right-4 -top-4 w-16 h-16 rounded-full bg-white/10 blur-xl" />
+              <div className="flex items-center justify-between relative"><TrendingDown className="w-5 h-5 opacity-70" /><Badge className="bg-white/20 text-white border-0 text-[10px]">PENDING</Badge></div>
+              <div className="mt-2 text-xl font-black">{formatINR(stats?.totalPending || 0)}</div>
+              <div className="text-[11px] font-semibold uppercase tracking-wider opacity-90">Total Pending</div>
+              <div className="text-[10px] mt-1 opacity-80">All batches combined</div>
+            </CardContent>
+          </Card>
+        </button>
+      </div>
+
+      {/* Batch-wise Pending Breakdown */}
+      {stats?.pendingByBatch && Object.keys(stats.pendingByBatch).length > 0 && (
+        <Card className="rounded-2xl border-0 shadow-sm">
+          <CardContent className="p-4">
+            <div className="text-xs font-black uppercase text-slate-600 mb-2 flex items-center gap-2"><FolderOpen className="w-4 h-4 text-orange-500" /> Pending Fees by Batch</div>
+            <div className="flex flex-wrap gap-2">
+              {Object.entries(stats.pendingByBatch).sort((a, b) => b[1] - a[1]).map(([batch, amt]) => (
+                <div key={batch} className={`px-3 py-2 rounded-xl border ${amt > 0 ? 'bg-red-50/50 border-red-200' : 'bg-emerald-50/50 border-emerald-200'}`}>
+                  <div className="text-[10px] font-bold uppercase text-slate-500">{batch}</div>
+                  <div className={`font-black ${amt > 0 ? 'text-red-600' : 'text-emerald-600'}`}>{formatINR(amt)}</div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Status pills: Paid / Pending / Both */}
       <div className="flex items-center gap-2 flex-wrap">
         <div className="inline-flex bg-slate-100 p-1 rounded-full">
@@ -1581,6 +1664,7 @@ function PaymentHistory({ currentUser }) {
                 <th className="text-left px-4 py-3 font-semibold">Mode</th>
                 <th className="text-left px-4 py-3 font-semibold">Linked Documents</th>
                 <th className="text-left px-4 py-3 font-semibold">Student Name</th>
+                <th className="text-left px-4 py-3 font-semibold">Due (This Student)</th>
                 <th className="text-left px-4 py-3 font-semibold">Date / Created Time</th>
                 <th className="text-left px-4 py-3 font-semibold">Bank Details</th>
                 <th className="text-left px-4 py-3 font-semibold">Created By</th>
@@ -1592,19 +1676,31 @@ function PaymentHistory({ currentUser }) {
                 const meta = METHOD_META[p.method] || METHOD_META.cash;
                 const color = PARTY_COLORS[(p.studentName || 'A').charCodeAt(0) % PARTY_COLORS.length];
                 const isPending = p._pending;
+                const studentSum = stats?.studentSummary?.[p.studentId];
+                const studentPending = studentSum?.pending || 0;
                 return (
                   <tr key={p.id} className={`border-b transition ${isPending ? 'bg-red-50/40 hover:bg-red-50' : 'hover:bg-orange-50/40 cursor-pointer'}`} onClick={() => !isPending && openEdit(p)}>
                     <td className="px-6 py-4">
-                      <div className={`font-bold text-lg ${isPending ? 'text-red-600' : 'text-slate-900'}`}>{isPending ? '' : ''}₹{Number(p.amount).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                      <div className={`font-bold text-lg ${isPending ? 'text-red-600' : 'text-slate-900'}`}>₹{Number(p.amount).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
                       {isPending && <div className="text-[10px] text-red-500 font-bold uppercase">Due {p.dueDate || '—'}</div>}
                     </td>
                     <td className="px-4 py-4"><Badge className={`${meta.chip} border-0 font-bold`}>{meta.label}</Badge></td>
                     <td className="px-4 py-4"><div className="text-sm font-semibold text-slate-700">{isPending ? <span className="text-red-500">— unpaid —</span> : (p.receiptNo || '—')}</div>{p.installmentLabel && <div className="text-xs text-slate-500">{p.installmentLabel}</div>}</td>
-                    <td className="px-4 py-4">
-                      <div className="flex items-center gap-2.5">
+                    <td className="px-4 py-4" onClick={e => { e.stopPropagation(); setStudentDrilldown(p.studentId); }}>
+                      <div className="flex items-center gap-2.5 hover:opacity-80 cursor-pointer">
                         <div className={`w-9 h-9 rounded-full ${color} text-white flex items-center justify-center text-xs font-bold shadow`}>{initials(p.studentName)}</div>
-                        <div><div className="font-semibold text-slate-900">{p.studentName}</div><div className="text-xs text-slate-500">{p.studentPhone || p.course}</div></div>
+                        <div><div className="font-semibold text-slate-900 hover:text-orange-600 hover:underline">{p.studentName}</div><div className="text-xs text-slate-500">{p.studentPhone || p.course}</div></div>
                       </div>
+                    </td>
+                    <td className="px-4 py-4">
+                      {studentPending > 0 ? (
+                        <div>
+                          <div className="font-bold text-red-600">{formatINR(studentPending)}</div>
+                          <div className="text-[10px] uppercase text-red-500 font-bold">Pending</div>
+                        </div>
+                      ) : (
+                        <Badge className="bg-emerald-100 text-emerald-700 border-0"><CheckCircle2 className="w-3 h-3 mr-1" /> All Paid</Badge>
+                      )}
                     </td>
                     <td className="px-4 py-4"><div className="font-medium text-slate-800">{fmtDate(p.paidAt)}</div><div className="text-xs text-slate-500">{isPending ? 'Due date' : fmtTime(p.paidAt)}</div></td>
                     <td className="px-4 py-4">
@@ -1616,8 +1712,9 @@ function PaymentHistory({ currentUser }) {
                     <td className="px-4 py-4"><div className="text-slate-700 font-medium">{p.createdByName || (isPending ? '—' : 'Admin')}</div></td>
                     <td className="px-4 py-4 text-right" onClick={e => e.stopPropagation()}>
                       <div className="flex justify-end gap-1">
-                        {!isPending && <button onClick={() => openEdit(p)} className="text-orange-600 hover:bg-orange-100 rounded p-1.5"><Edit3 className="w-4 h-4" /></button>}
-                        {!isPending && isSuper && <button onClick={() => del(p)} className="text-red-500 hover:bg-red-50 rounded p-1.5"><Trash2 className="w-4 h-4" /></button>}
+                        {!isPending && <button onClick={() => openEdit(p)} className="text-orange-600 hover:bg-orange-100 rounded p-1.5" title="Edit"><Edit3 className="w-4 h-4" /></button>}
+                        <button onClick={() => setStudentDrilldown(p.studentId)} className="text-blue-600 hover:bg-blue-50 rounded p-1.5" title="View student details"><Eye className="w-4 h-4" /></button>
+                        {!isPending && isSuper && <button onClick={() => del(p)} className="text-red-500 hover:bg-red-50 rounded p-1.5" title="Delete"><Trash2 className="w-4 h-4" /></button>}
                         {isPending && <Badge className="bg-red-500 text-white border-0 text-[10px]">PENDING</Badge>}
                       </div>
                     </td>
@@ -1625,7 +1722,7 @@ function PaymentHistory({ currentUser }) {
                 );
               })}
               {!filtered.length && (
-                <tr><td colSpan={8} className="text-center py-16 text-slate-400"><Wallet className="w-16 h-16 mx-auto mb-2 opacity-30" /><div className="text-lg font-semibold">No payments recorded yet</div><div className="text-sm">Payments will appear here as soon as fees are collected in Fees & Finance.</div></td></tr>
+                <tr><td colSpan={9} className="text-center py-16 text-slate-400"><Wallet className="w-16 h-16 mx-auto mb-2 opacity-30" /><div className="text-lg font-semibold">No payments recorded yet</div><div className="text-sm">Payments will appear here as soon as fees are collected in Fees & Finance.</div></td></tr>
               )}
             </tbody>
           </table>
@@ -1654,6 +1751,9 @@ function PaymentHistory({ currentUser }) {
           </div>
         </CardContent>
       </Card>
+
+      {/* Student Drilldown Dialog */}
+      <StudentPaymentDrilldown studentId={studentDrilldown} onClose={() => setStudentDrilldown(null)} allPayments={payments} stats={stats} />
 
       {/* Edit Payment Dialog */}
       <Dialog open={!!editing} onOpenChange={(o) => !o && setEditing(null)}>
@@ -1695,6 +1795,114 @@ function PaymentHistory({ currentUser }) {
         </DialogContent>
       </Dialog>
     </div>
+  );
+}
+
+// ---------------- STUDENT PAYMENT DRILLDOWN ----------------
+function StudentPaymentDrilldown({ studentId, onClose, allPayments, stats }) {
+  const [fees, setFees] = useState([]);
+  const [loading, setLoading] = useState(false);
+  useEffect(() => {
+    if (!studentId) return;
+    setLoading(true);
+    api('/fees').then(r => { setFees((r.fees || []).filter(f => f.studentId === studentId)); }).catch(() => {}).finally(() => setLoading(false));
+  }, [studentId]);
+  if (!studentId) return null;
+  const summary = stats?.studentSummary?.[studentId];
+  const studentPayments = (allPayments || []).filter(p => p.studentId === studentId);
+  const percent = summary?.total ? Math.round((summary.paid / summary.total) * 100) : 0;
+
+  return (
+    <Dialog open={!!studentId} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-3xl max-h-[92vh] overflow-y-auto p-0">
+        {/* Hero */}
+        <div className="bg-gradient-to-br from-slate-900 via-orange-900 to-red-900 p-6 text-white relative overflow-hidden">
+          <div className="absolute -right-10 -top-10 w-40 h-40 rounded-full bg-orange-500/30 blur-3xl" />
+          <div className="relative flex items-start gap-4">
+            <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-orange-500 to-red-500 flex items-center justify-center text-2xl font-black text-white shadow-xl">{initials(summary?.studentName || '—')}</div>
+            <div className="flex-1">
+              <DialogTitle className="text-2xl font-black text-white">{summary?.studentName || 'Student'}</DialogTitle>
+              <div className="text-white/70 text-sm mt-1 flex items-center gap-2 flex-wrap">
+                {summary?.course && <span>{summary.course}</span>}
+                {summary?.batchName && <><span className="text-white/40">·</span><span>{summary.batchName}</span></>}
+                {summary?.studentPhone && <><span className="text-white/40">·</span><span className="flex items-center gap-1"><Phone className="w-3 h-3" /> {summary.studentPhone}</span></>}
+              </div>
+            </div>
+          </div>
+          <div className="grid grid-cols-3 gap-3 mt-5 relative">
+            <div className="p-3 rounded-xl bg-white/10 backdrop-blur border border-white/20"><div className="text-[10px] uppercase font-bold text-white/70">Total Fee</div><div className="text-xl font-black text-white">{formatINR(summary?.total || 0)}</div></div>
+            <div className="p-3 rounded-xl bg-emerald-500/30 backdrop-blur border border-emerald-400/40"><div className="text-[10px] uppercase font-bold text-white/80">Paid</div><div className="text-xl font-black text-emerald-100">{formatINR(summary?.paid || 0)}</div></div>
+            <div className="p-3 rounded-xl bg-red-500/30 backdrop-blur border border-red-400/40"><div className="text-[10px] uppercase font-bold text-white/80">Pending</div><div className="text-xl font-black text-red-100">{formatINR(summary?.pending || 0)}</div></div>
+          </div>
+          {/* Progress bar */}
+          <div className="mt-4 h-2.5 rounded-full bg-white/15 overflow-hidden relative">
+            <div className="h-full bg-gradient-to-r from-emerald-400 to-emerald-300 transition-all duration-700" style={{ width: `${percent}%` }} />
+          </div>
+          <div className="text-[11px] mt-1 flex items-center justify-between text-white/80">
+            <span className="font-semibold">{percent}% collected</span>
+            <span>{studentPayments.length} payment(s) recorded</span>
+          </div>
+        </div>
+
+        {/* Fees + Installments */}
+        <div className="p-6 space-y-4">
+          <div className="text-xs font-black uppercase text-slate-700 flex items-center gap-2"><CalendarDays className="w-4 h-4 text-orange-500" /> Installment Schedule</div>
+          {loading && <div className="text-slate-500 text-sm">Loading…</div>}
+          {!loading && fees.map(f => (
+            <div key={f.id} className="rounded-2xl border-2 border-slate-100 overflow-hidden">
+              <div className="px-4 py-2 bg-slate-50 flex items-center justify-between">
+                <div className="font-bold text-slate-800">{f.course} <span className="text-slate-400 font-normal">·</span> <span className="text-xs text-slate-500">{f.batchName || 'No batch'}</span></div>
+                <Badge className={`border-0 ${f.status === 'paid' ? 'bg-emerald-100 text-emerald-800' : f.status === 'partial' ? 'bg-amber-100 text-amber-800' : 'bg-red-100 text-red-800'}`}>{f.status?.toUpperCase()}</Badge>
+              </div>
+              <div className="divide-y">
+                {(f.installments || []).map((inst, idx) => {
+                  const isOverdue = !inst.paid && inst.dueDate && new Date(inst.dueDate) < new Date();
+                  const meta = inst.method ? METHOD_META[inst.method] : null;
+                  return (
+                    <div key={idx} className={`flex items-center gap-3 px-4 py-3 ${inst.paid ? 'bg-emerald-50/40' : isOverdue ? 'bg-red-50/40' : ''}`}>
+                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center font-black text-white text-xs flex-shrink-0 ${inst.paid ? 'bg-gradient-to-br from-emerald-500 to-teal-600' : isOverdue ? 'bg-gradient-to-br from-red-500 to-rose-600' : 'bg-gradient-to-br from-orange-400 to-red-500'}`}>{idx + 1}</div>
+                      <div className="flex-1 min-w-0">
+                        <div className="font-semibold text-sm truncate">{inst.label}</div>
+                        <div className="text-xs text-slate-500 flex items-center gap-2 flex-wrap">
+                          <span>Due: <b>{inst.dueDate}</b></span>
+                          {inst.paid && meta && <Badge className={`${meta.chip} border-0 text-[10px] py-0`}>{meta.label}</Badge>}
+                          {inst.paid && <span className="text-emerald-700 font-semibold">Paid {inst.paidDate}</span>}
+                          {isOverdue && <Badge className="bg-red-500 text-white border-0 text-[10px] py-0">OVERDUE</Badge>}
+                        </div>
+                      </div>
+                      <div className={`font-black text-base ${inst.paid ? 'text-emerald-700' : 'text-slate-900'}`}>{formatINR(inst.amount)}</div>
+                      {inst.paid ? <CheckCircle2 className="w-5 h-5 text-emerald-500" /> : <div className="w-5 h-5 rounded-full border-2 border-red-400" />}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+          {!loading && !fees.length && <div className="text-center py-8 text-slate-400"><IndianRupee className="w-12 h-12 mx-auto opacity-30 mb-2" /><div>No fee records for this student</div></div>}
+
+          {/* Payments history for this student */}
+          {studentPayments.length > 0 && (
+            <>
+              <div className="text-xs font-black uppercase text-slate-700 flex items-center gap-2 mt-4"><Wallet className="w-4 h-4 text-orange-500" /> Payment Log ({studentPayments.length})</div>
+              <div className="space-y-2 max-h-56 overflow-y-auto">
+                {studentPayments.map(p => {
+                  const meta = METHOD_META[p.method] || METHOD_META.cash;
+                  return (
+                    <div key={p.id} className="flex items-center gap-3 p-3 rounded-xl bg-slate-50 hover:bg-slate-100">
+                      <Badge className={`${meta.chip} border-0`}>{meta.label}</Badge>
+                      <div className="flex-1 min-w-0"><div className="text-sm font-semibold truncate">{p.installmentLabel || '—'}</div><div className="text-xs text-slate-500">{p.receiptNo} · {new Date(p.paidAt).toLocaleDateString('en-GB')}</div></div>
+                      <div className="font-bold text-emerald-700">{formatINR(p.amount)}</div>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
+        </div>
+
+        <DialogFooter className="px-6 pb-6"><Button onClick={onClose}>Close</Button></DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
