@@ -1221,21 +1221,97 @@ function Fees({ currentUser }) {
       )}
 
       <Dialog open={!!detail} onOpenChange={(o) => !o && setDetail(null)}>
-        <DialogContent className="max-w-2xl max-h-[92vh] overflow-y-auto">
+        <DialogContent className="max-w-3xl max-h-[92vh] overflow-y-auto p-0">
           {detail && (<>
-            <DialogHeader><DialogTitle className="flex items-center justify-between"><span>{detail.studentName}</span><Badge className={`border-0 ${detail.status === 'paid' ? 'bg-emerald-100 text-emerald-800' : detail.status === 'partial' ? 'bg-amber-100 text-amber-800' : 'bg-red-100 text-red-800'}`}>{detail.status}</Badge></DialogTitle><DialogDescription>{detail.course} · {detail.batchName || 'No batch'}</DialogDescription></DialogHeader>
-            <div className="grid grid-cols-3 gap-3"><div className="p-4 rounded-xl bg-slate-100"><div className="text-xs text-slate-500">Total</div><div className="text-xl font-bold">{formatINR(detail.totalAmount)}</div></div><div className="p-4 rounded-xl bg-emerald-50"><div className="text-xs text-emerald-700">Paid</div><div className="text-xl font-bold text-emerald-700">{formatINR(detail.paidAmount)}</div></div><div className="p-4 rounded-xl bg-red-50"><div className="text-xs text-red-600">Pending</div><div className="text-xl font-bold text-red-600">{formatINR(detail.pendingAmount)}</div></div></div>
-            <div><div className="text-xs font-bold text-slate-500 uppercase mb-2">Installments ({detail.installmentCount || detail.installments?.length})</div><div className="space-y-2">
-              {detail.installments?.map((i, idx) => (<div key={idx} className="flex items-center justify-between p-3 rounded-xl border"><div><div className="font-semibold text-sm">{i.label}</div><div className="text-xs text-slate-500">Due: {i.dueDate} {i.paid && `· Paid ${i.paidDate}`}</div></div><div className="flex items-center gap-3"><div className="font-bold">{formatINR(i.amount)}</div>{i.paid ? <Badge className="bg-emerald-100 text-emerald-800 border-0">Paid</Badge> : <Button size="sm" onClick={() => payInstallment(detail, idx)} className="bg-orange-500 hover:bg-orange-600 text-white">Collect</Button>}</div></div>))}
-            </div></div>
-            <DialogFooter className="flex-wrap gap-2"><Button variant="outline" onClick={() => { setEditForm({ totalAmount: detail.totalAmount, installmentCount: detail.installmentCount || detail.installments?.length || 3, customInstallments: (detail.installments || []).map(i => ({ amount: i.amount, dueDate: i.dueDate, label: i.label })), useCustom: true }); setEditOpen(true); }}><Edit3 className="w-4 h-4 mr-1" /> Edit</Button><Button variant="outline" className="text-red-600" onClick={() => del(detail.id)}><Trash2 className="w-4 h-4 mr-1" /> Delete</Button><Button onClick={() => setDetail(null)}>Close</Button></DialogFooter>
+            {/* HERO HEADER */}
+            <div className="bg-gradient-to-br from-orange-500 via-red-500 to-amber-500 p-6 text-white relative overflow-hidden">
+              <div className="absolute -right-8 -top-8 w-40 h-40 rounded-full bg-white/10 blur-2xl" />
+              <div className="absolute right-12 bottom-4 opacity-10"><IndianRupee className="w-32 h-32" /></div>
+              <div className="relative flex items-start gap-4">
+                <div className="w-16 h-16 rounded-2xl bg-white/20 backdrop-blur border border-white/30 flex items-center justify-center text-2xl font-black">{initials(detail.studentName)}</div>
+                <div className="flex-1">
+                  <DialogTitle className="text-2xl font-black text-white">{detail.studentName}</DialogTitle>
+                  <div className="mt-1 flex items-center gap-2 flex-wrap"><Badge className={`border-0 ${detail.status === 'paid' ? 'bg-emerald-500 text-white' : detail.status === 'partial' ? 'bg-amber-400 text-slate-900' : 'bg-white text-red-600'}`}>{detail.status?.toUpperCase()}</Badge><span className="text-white/90 text-sm">{detail.course}</span><span className="text-white/60">·</span><span className="text-white/90 text-sm">{detail.batchName || 'No batch'}</span></div>
+                </div>
+              </div>
+              <div className="grid grid-cols-3 gap-3 mt-5 relative">
+                <div className="p-3 rounded-xl bg-white/15 backdrop-blur border border-white/20"><div className="text-[10px] uppercase font-bold text-white/70">Total Fee</div><div className="text-xl font-black">{formatINR(detail.totalAmount)}</div></div>
+                <div className="p-3 rounded-xl bg-emerald-500/30 backdrop-blur border border-white/20"><div className="text-[10px] uppercase font-bold text-white/70">Collected</div><div className="text-xl font-black">{formatINR(detail.paidAmount)}</div></div>
+                <div className="p-3 rounded-xl bg-red-500/40 backdrop-blur border border-white/20"><div className="text-[10px] uppercase font-bold text-white/70">Pending</div><div className="text-xl font-black">{formatINR(detail.pendingAmount)}</div></div>
+              </div>
+              {/* Progress bar */}
+              <div className="mt-4 h-2 rounded-full bg-white/20 overflow-hidden relative">
+                <div className="h-full bg-gradient-to-r from-emerald-300 to-emerald-500 transition-all duration-500" style={{ width: `${detail.totalAmount ? (detail.paidAmount / detail.totalAmount) * 100 : 0}%` }} />
+              </div>
+              <div className="text-[11px] text-white/80 mt-1 font-semibold">{detail.totalAmount ? Math.round((detail.paidAmount / detail.totalAmount) * 100) : 0}% collected</div>
+            </div>
+
+            {/* INSTALLMENTS LIST */}
+            <div className="p-6 space-y-4">
+              <div className="flex items-center justify-between">
+                <div className="text-xs font-black text-slate-700 uppercase flex items-center gap-2"><CalendarDays className="w-4 h-4 text-orange-500" /> Installment Schedule <span className="text-slate-400 font-normal">({detail.installmentCount || detail.installments?.length})</span></div>
+                <div className="text-xs text-slate-500">Next: <b className="text-slate-900">{detail.installments?.find(i => !i.paid)?.label || 'All paid ✅'}</b></div>
+              </div>
+              <div className="space-y-2.5">
+                {detail.installments?.map((i, idx) => {
+                  const methMeta = i.method ? METHOD_META[i.method] : null;
+                  const isOverdue = !i.paid && i.dueDate && new Date(i.dueDate) < new Date();
+                  return (
+                    <div key={idx} className={`group p-4 rounded-2xl border-2 transition ${i.paid ? 'bg-emerald-50/60 border-emerald-200' : isOverdue ? 'bg-red-50/40 border-red-200' : 'bg-white border-slate-200 hover:border-orange-300 hover:shadow-md'}`}>
+                      <div className="flex items-center justify-between gap-3 flex-wrap">
+                        <div className="flex items-center gap-3 flex-1 min-w-0">
+                          <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-black text-white flex-shrink-0 ${i.paid ? 'bg-gradient-to-br from-emerald-500 to-teal-600' : isOverdue ? 'bg-gradient-to-br from-red-500 to-rose-600' : 'bg-gradient-to-br from-orange-400 to-red-500'}`}>{idx + 1}</div>
+                          <div className="min-w-0">
+                            <div className="font-bold text-slate-900 truncate">{i.label}</div>
+                            <div className="text-xs text-slate-500 flex items-center gap-2 flex-wrap">
+                              <span>Due: <b>{i.dueDate}</b></span>
+                              {i.paid && <><span>·</span><span className="text-emerald-700 font-semibold">Paid {i.paidDate}</span></>}
+                              {i.paid && methMeta && <Badge className={`${methMeta.chip} border-0 text-[10px] py-0`}>{methMeta.label}</Badge>}
+                              {isOverdue && <Badge className="bg-red-500 text-white border-0 text-[10px] py-0">OVERDUE</Badge>}
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <div className={`font-black text-lg ${i.paid ? 'text-emerald-700' : 'text-slate-900'}`}>{formatINR(i.amount)}</div>
+                          {i.paid ? (
+                            <div className="flex items-center gap-1 px-3 py-1.5 rounded-full bg-emerald-500 text-white font-bold text-xs shadow-lg shadow-emerald-500/30"><CheckCircle2 className="w-4 h-4" /> PAID</div>
+                          ) : (
+                            <Button size="sm" onClick={() => payInstallment(detail, idx)} className="bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 text-white shadow-lg shadow-orange-500/30 font-bold group-hover:scale-105 transition">
+                              <Wallet className="w-4 h-4 mr-1" /> Collect Now
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            <DialogFooter className="flex-wrap gap-2 px-6 pb-6">
+              <Button variant="outline" onClick={() => { setEditForm({ totalAmount: detail.totalAmount, installmentCount: detail.installmentCount || detail.installments?.length || 3, customInstallments: (detail.installments || []).map(i => ({ amount: i.amount, dueDate: i.dueDate, label: i.label, paid: i.paid, method: i.method })), useCustom: true }); setEditOpen(true); }}><Edit3 className="w-4 h-4 mr-1" /> Edit Schedule</Button>
+              <Button variant="outline" className="text-red-600 border-red-200 hover:bg-red-50" onClick={() => del(detail.id)}><Trash2 className="w-4 h-4 mr-1" /> Delete Fee</Button>
+              <Button onClick={() => setDetail(null)}>Close</Button>
+            </DialogFooter>
           </>)}
         </DialogContent>
       </Dialog>
 
       <Dialog open={editOpen} onOpenChange={setEditOpen}>
         <DialogContent className="max-w-2xl max-h-[92vh] overflow-y-auto"><DialogHeader><DialogTitle>Edit Fee & Installments</DialogTitle><DialogDescription>Customize each installment amount and due date</DialogDescription></DialogHeader>
-          <FlexibleInstallmentEditor value={editForm} onChange={setEditForm} />
+          <FlexibleInstallmentEditor value={editForm} onChange={setEditForm} onCollect={async (idx) => {
+            // Ensure edits are saved first so the installment exists in DB before payment
+            try {
+              const body = { customInstallments: editForm.customInstallments };
+              await api(`/fees/${detail.id}`, { method: 'PATCH', body: JSON.stringify(body) });
+              const updated = await api(`/fees`);
+              const freshFee = updated.fees.find(f => f.id === detail.id) || detail;
+              setDetail(freshFee);
+              setEditOpen(false);
+              setTimeout(() => payInstallment(freshFee, idx), 300);
+              load();
+            } catch (e) { toast.error(e.message); }
+          }} />
           <DialogFooter><Button variant="outline" onClick={() => setEditOpen(false)}>Cancel</Button><Button onClick={saveEdit} className="bg-orange-500 hover:bg-orange-600 text-white">Save</Button></DialogFooter>
         </DialogContent>
       </Dialog>
@@ -1450,7 +1526,7 @@ function PaymentHistory({ currentUser }) {
           <p className="text-slate-500 text-sm">Every fee collection, cash or online — searchable, filterable, editable</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          <div className="relative"><Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" /><Input placeholder="Search payment, party name, amount…" className="pl-9 w-72 rounded-full bg-white" value={search} onChange={e => setSearch(e.target.value)} /></div>
+          <div className="relative"><Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" /><Input placeholder="Search payment, student name, amount…" className="pl-9 w-72 rounded-full bg-white" value={search} onChange={e => setSearch(e.target.value)} /></div>
           <Select value={periodFilter} onValueChange={setPeriodFilter}><SelectTrigger className="w-40 rounded-full bg-white"><SelectValue /></SelectTrigger><SelectContent>
             <SelectItem value="all">All Time</SelectItem>
             <SelectItem value="today">Today</SelectItem>
@@ -1504,7 +1580,7 @@ function PaymentHistory({ currentUser }) {
                 <th className="text-left px-6 py-3 font-semibold">Amount</th>
                 <th className="text-left px-4 py-3 font-semibold">Mode</th>
                 <th className="text-left px-4 py-3 font-semibold">Linked Documents</th>
-                <th className="text-left px-4 py-3 font-semibold">Party Name</th>
+                <th className="text-left px-4 py-3 font-semibold">Student Name</th>
                 <th className="text-left px-4 py-3 font-semibold">Date / Created Time</th>
                 <th className="text-left px-4 py-3 font-semibold">Bank Details</th>
                 <th className="text-left px-4 py-3 font-semibold">Created By</th>
@@ -2203,7 +2279,7 @@ function Assignments({ currentUser }) {
 }
 
 // ---------------- FLEXIBLE INSTALLMENT EDITOR ----------------
-function FlexibleInstallmentEditor({ value, onChange, allowFullTotal = false }) {
+function FlexibleInstallmentEditor({ value, onChange, allowFullTotal = false, onCollect }) {
   const insts = value.customInstallments || [];
   const total = insts.reduce((a, i) => a + (Number(i.amount) || 0), 0);
   const use = value.useCustom;
@@ -2255,15 +2331,22 @@ function FlexibleInstallmentEditor({ value, onChange, allowFullTotal = false }) 
         {!insts.length && <div className="text-center text-sm text-slate-400 py-6 border rounded-xl border-dashed">Select a preset above OR click "Add" to build a custom schedule</div>}
         <div className="space-y-2 max-h-72 overflow-y-auto">
           {insts.map((i, idx) => (
-            <div key={idx} className="flex items-center gap-2 p-2 rounded-xl border bg-white">
-              <div className="w-8 h-8 rounded-lg bg-orange-100 text-orange-700 flex items-center justify-center font-bold text-xs">{idx + 1}</div>
-              <Input value={i.label} onChange={e => update(idx, 'label', e.target.value)} placeholder="Label" className="w-32 h-8 text-xs" />
-              <Input type="date" value={i.dueDate} onChange={e => update(idx, 'dueDate', e.target.value)} className="w-36 h-8 text-xs" />
+            <div key={idx} className={`flex items-center gap-2 p-2 rounded-xl border ${i.paid ? 'bg-emerald-50/60 border-emerald-200' : 'bg-white border-slate-200'}`}>
+              <div className={`w-8 h-8 rounded-lg flex items-center justify-center font-bold text-xs ${i.paid ? 'bg-emerald-100 text-emerald-700' : 'bg-orange-100 text-orange-700'}`}>{i.paid ? <CheckCircle2 className="w-4 h-4" /> : idx + 1}</div>
+              <Input value={i.label} onChange={e => update(idx, 'label', e.target.value)} placeholder="Label" className="w-32 h-8 text-xs" disabled={i.paid} />
+              <Input type="date" value={i.dueDate} onChange={e => update(idx, 'dueDate', e.target.value)} className="w-36 h-8 text-xs" disabled={i.paid} />
               <div className="relative flex-1">
                 <span className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400 text-xs">₹</span>
-                <Input type="number" value={i.amount} onChange={e => update(idx, 'amount', Number(e.target.value))} placeholder="Amount" className="pl-6 h-8 font-semibold" />
+                <Input type="number" value={i.amount} onChange={e => update(idx, 'amount', Number(e.target.value))} placeholder="Amount" className="pl-6 h-8 font-semibold" disabled={i.paid} />
               </div>
-              <Button size="icon" variant="ghost" type="button" onClick={() => remove(idx)} className="h-8 w-8 text-red-500"><Trash2 className="w-3.5 h-3.5" /></Button>
+              {i.paid ? (
+                <Badge className="bg-emerald-500 text-white border-0 text-[10px] flex-shrink-0">PAID</Badge>
+              ) : onCollect ? (
+                <Button size="sm" type="button" onClick={() => onCollect(idx)} className="h-8 bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 text-white text-xs font-bold shadow shadow-orange-500/30 flex-shrink-0">
+                  <Wallet className="w-3 h-3 mr-1" /> Collect
+                </Button>
+              ) : null}
+              {!i.paid && <Button size="icon" variant="ghost" type="button" onClick={() => remove(idx)} className="h-8 w-8 text-red-500 flex-shrink-0"><Trash2 className="w-3.5 h-3.5" /></Button>}
             </div>
           ))}
         </div>
