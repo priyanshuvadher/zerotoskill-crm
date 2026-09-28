@@ -1729,25 +1729,26 @@ function PaymentHistory({ currentUser }) {
         </CardContent>
       </Card>
 
-      {/* Bottom Stats Bar */}
+      {/* Bottom Stats Bar — Net Amount + Pending Amount (LIVE from Payment History) */}
       <Card className="rounded-2xl border-0 shadow-lg bg-white sticky bottom-4">
-        <CardContent className="p-4 flex items-center gap-6 flex-wrap">
-          <div className="flex items-center gap-2 px-4 py-2 rounded-full bg-slate-100">
-            <span className="text-xs font-semibold text-slate-600">Net Balance</span>
-            <span className={`font-bold text-lg ${netBalance >= 0 ? 'text-slate-900' : 'text-red-600'}`}>{formatINR(netBalance)}</span>
-          </div>
-          <div className="flex items-center gap-2 px-4 py-2 rounded-full bg-emerald-50">
-            <span className="text-xs font-semibold text-emerald-700">You Received:</span>
-            <span className="font-bold text-lg text-emerald-700">{formatINR(totalReceived)}</span>
-          </div>
-          {isSuper && (
-            <div className="flex items-center gap-2 px-4 py-2 rounded-full bg-orange-50">
-              <span className="text-xs font-semibold text-orange-700">You Gave:</span>
-              <span className="font-bold text-lg text-orange-700">{formatINR(totalPaidOut)}</span>
+        <CardContent className="p-4 flex items-center gap-4 flex-wrap">
+          <div className="flex items-center gap-3 px-5 py-2.5 rounded-full bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-lg shadow-emerald-500/30">
+            <div className="w-9 h-9 rounded-full bg-white/20 backdrop-blur flex items-center justify-center"><Wallet className="w-5 h-5" /></div>
+            <div>
+              <div className="text-[10px] font-bold uppercase tracking-wider text-white/80">Net Amount Received</div>
+              <div className="font-black text-xl leading-tight">{formatINR(totalReceived)}</div>
             </div>
-          )}
+          </div>
+          <div className="flex items-center gap-3 px-5 py-2.5 rounded-full bg-gradient-to-r from-red-500 to-rose-600 text-white shadow-lg shadow-red-500/30">
+            <div className="w-9 h-9 rounded-full bg-white/20 backdrop-blur flex items-center justify-center"><TrendingDown className="w-5 h-5" /></div>
+            <div>
+              <div className="text-[10px] font-bold uppercase tracking-wider text-white/80">Pending Amount</div>
+              <div className="font-black text-xl leading-tight">{formatINR(stats?.totalPending || 0)}</div>
+            </div>
+          </div>
           <div className="text-sm text-slate-500 flex-1 text-right">
-            Showing <b className="text-slate-900">{filtered.length}</b> of {payments.length} · Filtered total: <b className="text-slate-900">{formatINR(filteredReceived)}</b>
+            <div>Showing <b className="text-slate-900">{filtered.length}</b> of {payments.length} payments</div>
+            <div className="text-xs">Filtered total: <b className="text-slate-900">{formatINR(filteredReceived)}</b></div>
           </div>
         </CardContent>
       </Card>
