@@ -798,11 +798,40 @@ export async function PATCH(request, { params }) {
       if (!me || !['super_admin', 'counselor', 'academic_manager'].includes(me.role)) return err('Forbidden', 403);
       const body = await request.json();
       if (body.firstName || body.lastName) body.name = `${body.firstName || ''} ${body.lastName || ''}`.trim();
-      if (body.batchId) { const b = await db.collection('batches').findOne({ id: body.batchId }); if (b) { body.batchName = b.name; body.mentorId = b.facultyId; body.mentorName = b.facultyName; } }
+      // Clear-batch sentinel: '', null, 'none' etc. all mean "unassign"
+      let batchChange = null;
+      if (Object.prototype.hasOwnProperty.call(body, 'batchId')) {
+        if (!body.batchId || body.batchId === 'none' || body.batchId === 'null') {
+          body.batchId = null; body.batchName = null; body.mentorId = null; body.mentorName = null;
+          batchChange = { batchId: null, batchName: null };
+        } else {
+          const b = await db.collection('batches').findOne({ id: body.batchId });
+          if (b) { body.batchName = b.name; body.mentorId = b.facultyId; body.mentorName = b.facultyName; batchChange = { batchId: b.id, batchName: b.name }; }
+        }
+      }
       if (body.password) { body.password = await hashPassword(body.password); body.plainPassword = body.password; }
       await db.collection('users').updateOne({ id: p[1], role: 'student' }, { $set: { ...body, updatedAt: new Date().toISOString() } });
-      if (body.name) await db.collection('fees').updateMany({ studentId: p[1] }, { $set: { studentName: body.name } });
-      return ok({ success: true });
+
+      // Propagate changes to related collections so Fees & Finance / Payment History reflect the transfer
+      const feePatch = {};
+      if (body.name !== undefined) feePatch.studentName = body.name;
+      if (body.phone !== undefined) feePatch.studentPhone = body.phone;
+      if (body.email !== undefined) feePatch.studentEmail = body.email;
+      if (body.course !== undefined) feePatch.course = body.course;
+      if (batchChange) { feePatch.batchId = batchChange.batchId; feePatch.batchName = batchChange.batchName; }
+      if (Object.keys(feePatch).length) {
+        await db.collection('fees').updateMany({ studentId: p[1] }, { $set: feePatch });
+        // Also update ALL related payment history records
+        const paymentPatch = {};
+        if (body.name !== undefined) paymentPatch.studentName = body.name;
+        if (body.phone !== undefined) paymentPatch.studentPhone = body.phone;
+        if (body.course !== undefined) paymentPatch.course = body.course;
+        if (batchChange) paymentPatch.batchName = batchChange.batchName;
+        if (Object.keys(paymentPatch).length) {
+          await db.collection('payments').updateMany({ studentId: p[1] }, { $set: paymentPatch });
+        }
+      }
+      return ok({ success: true, batchChange });
     }
     if (p[0] === 'batches' && p[1]) {
       const body = await request.json();
