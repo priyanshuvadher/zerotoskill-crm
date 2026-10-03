@@ -147,6 +147,23 @@ export async function GET(request, { params }) {
       return ok({ followups: leads, count: leads.length, today });
     }
 
+    // UNIFIED FOLLOWUP VIEW with tab bucketing
+    if (route === 'followups/all') {
+      const me = await currentUser(request); if (!me) return err('Unauthorized', 401);
+      const today = new Date(); today.setHours(0,0,0,0);
+      const todayStr = today.toISOString().slice(0,10);
+      const in7 = new Date(today); in7.setDate(in7.getDate() + 7); const in7Str = in7.toISOString().slice(0,10);
+      const base = me.role === 'sales_manager' ? { assignedTo: me.id } : {};
+      const notConverted = { status: { $nin: ['onboarded', 'confirmed', 'dropped'] } };
+      const [overdue, dueToday, upcoming, completed] = await Promise.all([
+        db.collection('leads').find({ ...base, ...notConverted, followupDate: { $gt: '', $lt: todayStr } }, { projection: { _id: 0 } }).toArray(),
+        db.collection('leads').find({ ...base, ...notConverted, followupDate: todayStr }, { projection: { _id: 0 } }).toArray(),
+        db.collection('leads').find({ ...base, ...notConverted, followupDate: { $gt: todayStr, $lte: in7Str } }, { projection: { _id: 0 } }).toArray(),
+        db.collection('leads').find({ ...base, status: { $in: ['confirmed', 'onboarded'] } }, { projection: { _id: 0 } }).sort({ updatedAt: -1 }).limit(20).toArray(),
+      ]);
+      return ok({ overdue, dueToday, upcoming, completed, counts: { overdue: overdue.length, dueToday: dueToday.length, upcoming: upcoming.length, completed: completed.length } });
+    }
+
     // SALES MANAGERS list (for assigning leads)
     if (route === 'sales-managers') {
       const me = await currentUser(request); if (!me) return err('Unauthorized', 401);
@@ -811,6 +828,20 @@ export async function PATCH(request, { params }) {
       if (me.role === 'sales_manager' && lead.assignedTo !== me.id) return err('Forbidden — not your lead', 403);
       await db.collection('leads').updateOne({ id }, { $set: { status, updatedAt: new Date().toISOString() } });
       return ok({ success: true });
+    }
+
+    // LOG A FOLLOWUP (call outcome) & optionally snooze
+    if (route === 'leads/log-followup') {
+      const me = await currentUser(request); if (!me) return err('Unauthorized', 401);
+      const { id, outcome, notes = '', nextFollowupDate } = await request.json();
+      const lead = await db.collection('leads').findOne({ id });
+      if (!lead) return err('Lead not found', 404);
+      if (me.role === 'sales_manager' && lead.assignedTo !== me.id) return err('Forbidden — not your lead', 403);
+      const entry = { id: uuidv4(), outcome, notes, by: me.id, byName: me.name, at: new Date().toISOString() };
+      const patch = { $push: { followupHistory: entry }, $set: { lastFollowup: entry, updatedAt: new Date().toISOString() } };
+      if (nextFollowupDate) patch.$set.followupDate = nextFollowupDate;
+      await db.collection('leads').updateOne({ id }, patch);
+      return ok({ success: true, entry });
     }
     if (p[0] === 'leads' && p[1]) {
       const me = await currentUser(request); if (!me) return err('Unauthorized', 401);

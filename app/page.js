@@ -812,7 +812,7 @@ function Admissions({ currentUser }) {
           )}
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          <div className="flex bg-white border rounded-full p-0.5">{[{k:'kanban',I:Kanban,L:'Kanban'},{k:'list',I:List,L:'List'},{k:'excel',I:Sheet,L:'Excel'}].map(v => (<button key={v.k} onClick={() => setView(v.k)} className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-medium ${view === v.k ? 'bg-orange-500 text-white' : 'text-slate-600 hover:bg-slate-100'}`}><v.I className="w-3.5 h-3.5" /> {v.L}</button>))}</div>
+          <div className="flex bg-white border rounded-full p-0.5">{[{k:'kanban',I:Kanban,L:'Kanban'},{k:'list',I:List,L:'List'},{k:'excel',I:Sheet,L:'Excel'},{k:'followups',I:Bell,L:'Follow-ups'}].map(v => (<button key={v.k} onClick={() => setView(v.k)} className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-medium ${view === v.k ? 'bg-orange-500 text-white' : 'text-slate-600 hover:bg-slate-100'}`}><v.I className="w-3.5 h-3.5" /> {v.L}</button>))}</div>
           <div className="relative"><Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" /><Input placeholder="Search..." className="pl-9 w-56 rounded-full bg-white" value={search} onChange={e => setSearch(e.target.value)} /></div>
           <Select value={stageFilter} onValueChange={setStageFilter}><SelectTrigger className="w-36 rounded-full bg-white"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All Stages</SelectItem>{STAGES.map(s => <SelectItem key={s.key} value={s.key}>{s.label}</SelectItem>)}</SelectContent></Select>
           {!isSalesManager && managers.length > 0 && (
@@ -871,7 +871,7 @@ function Admissions({ currentUser }) {
       )}
 
       {/* Monthly Folders */}
-      {activeMonth === 'all' && (
+      {view !== 'followups' && activeMonth === 'all' && (
         <div>
           <div className="flex items-center justify-between mb-3">
             <h3 className="font-bold text-lg flex items-center gap-2"><CalendarDays className="w-5 h-5 text-orange-500" /> Monthly Folders</h3>
@@ -995,7 +995,11 @@ function Admissions({ currentUser }) {
       )}
 
       {view === 'excel' && activeMonth !== 'all' && (
-        <Card className="rounded-2xl border-0 shadow-sm"><CardContent className="p-0 overflow-x-auto"><table className="w-full text-xs border-collapse"><thead className="bg-slate-900 text-white"><tr>{['Name','Course','Source','Phone','City','Stage','Notes','Followup','Actions'].map(h => <th key={h} className="text-left px-3 py-2 font-semibold border border-slate-700">{h}</th>)}</tr></thead><tbody>{filtered.map((l, i) => { const stage = ALL_STAGES.find(s => s.key === l.status) || STAGES[0]; return (<tr key={l.id} className={`cursor-pointer hover:bg-orange-50 ${i % 2 === 0 ? 'bg-white' : 'bg-slate-50'}`} onClick={() => setDetailLead(l)}><td className="px-3 py-2 border font-medium">{l.name}</td><td className="px-3 py-2 border">{l.course}</td><td className="px-3 py-2 border">{l.source}</td><td className="px-3 py-2 border">{l.phone}</td><td className="px-3 py-2 border">{l.city || '—'}</td><td className="px-3 py-2 border"><Badge className={`${stage.chip} border-0 text-[10px]`}>{stage.label}</Badge></td><td className="px-3 py-2 border max-w-[180px] truncate italic text-amber-700">{l.notes ? '📝 ' + l.notes : <span className="text-slate-300">—</span>}</td><td className="px-3 py-2 border">{l.followupDate || '—'}</td><td className="px-3 py-2 border" onClick={e => e.stopPropagation()}><div className="flex items-center gap-1"><Select value={l.status} onValueChange={v => moveLead(l.id, v)}><SelectTrigger className="h-6 text-[10px] w-24"><SelectValue /></SelectTrigger><SelectContent>{ALL_STAGES.map(s => <SelectItem key={s.key} value={s.key} className="text-xs">{s.label}</SelectItem>)}</SelectContent></Select><button onClick={() => setDetailLead(l)} className="text-orange-600 hover:bg-orange-50 rounded p-1"><Edit3 className="w-3 h-3" /></button><button onClick={() => del(l.id)} className="text-red-500 hover:bg-red-50 rounded p-1"><Trash2 className="w-3 h-3" /></button></div></td></tr>);})}</tbody></table></CardContent></Card>
+        <SpreadsheetView leads={filtered} stages={ALL_STAGES} moveLead={moveLead} del={del} setDetailLead={setDetailLead} managers={managers} isSalesManager={isSalesManager} reload={load} />
+      )}
+
+      {view === 'followups' && (
+        <FollowupCenter onOpen={(l) => setDetailLead(l)} reload={load} stages={ALL_STAGES} />
       )}
 
       <LeadDetailDialog lead={detailLead} onClose={() => setDetailLead(null)} onUpdated={load} onDelete={async (id) => { await del(id); setDetailLead(null); }} stages={ALL_STAGES} courses={courses} managers={managers} isSalesManager={isSalesManager} />
@@ -1101,6 +1105,339 @@ const InfoRow = ({ icon: Icon, label, value }) => (
     <div className="min-w-0"><div className="text-[10px] uppercase text-slate-400 font-bold">{label}</div><div className="text-sm font-medium text-slate-800 truncate">{value}</div></div>
   </div>
 );
+
+// ---------------- FOLLOW-UP CENTER ----------------
+const OUTCOMES = [
+  { k: 'interested', label: 'Interested', chip: 'bg-emerald-100 text-emerald-700', dot: 'bg-emerald-500' },
+  { k: 'not_interested', label: 'Not Interested', chip: 'bg-red-100 text-red-700', dot: 'bg-red-500' },
+  { k: 'no_answer', label: 'No Answer', chip: 'bg-amber-100 text-amber-700', dot: 'bg-amber-500' },
+  { k: 'call_later', label: 'Call Later', chip: 'bg-blue-100 text-blue-700', dot: 'bg-blue-500' },
+  { k: 'busy', label: 'Busy', chip: 'bg-slate-100 text-slate-700', dot: 'bg-slate-500' },
+  { k: 'converted', label: 'Converted ✓', chip: 'bg-violet-100 text-violet-700', dot: 'bg-violet-500' },
+];
+
+function FollowupCenter({ onOpen, reload, stages }) {
+  const [data, setData] = useState({ overdue: [], dueToday: [], upcoming: [], completed: [], counts: {} });
+  const [tab, setTab] = useState('dueToday');
+  const [logLead, setLogLead] = useState(null);
+  const [logForm, setLogForm] = useState({ outcome: 'no_answer', notes: '', nextFollowupDate: '' });
+
+  const load = async () => {
+    try { const r = await api('/followups/all'); setData(r); } catch (e) { toast.error(e.message); }
+  };
+  useEffect(() => { load(); }, []);
+
+  const openLog = (lead) => {
+    setLogLead(lead);
+    const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1);
+    setLogForm({ outcome: 'no_answer', notes: '', nextFollowupDate: tomorrow.toISOString().slice(0,10) });
+  };
+  const submitLog = async () => {
+    try {
+      await api('/leads/log-followup', { method: 'POST', body: JSON.stringify({ id: logLead.id, outcome: logForm.outcome, notes: logForm.notes, nextFollowupDate: logForm.nextFollowupDate }) });
+      notify('Follow-up logged', `${logLead.name} · ${logForm.outcome.replace('_', ' ').toUpperCase()}`);
+      setLogLead(null); load(); reload && reload();
+    } catch (e) { toast.error(e.message); }
+  };
+  const snooze = async (lead, days) => {
+    const d = new Date(); d.setDate(d.getDate() + days);
+    try { await api(`/leads/${lead.id}`, { method: 'PATCH', body: JSON.stringify({ followupDate: d.toISOString().slice(0,10) }) }); notify('Snoozed', `${lead.name} → ${d.toLocaleDateString('en-GB')}`); load(); reload && reload(); } catch (e) { toast.error(e.message); }
+  };
+
+  const tabs = [
+    { k: 'overdue', label: 'Overdue', icon: '🔥', count: data.counts.overdue || 0, color: 'from-red-500 to-rose-600', text: 'text-red-700' },
+    { k: 'dueToday', label: 'Due Today', icon: '⏰', count: data.counts.dueToday || 0, color: 'from-orange-500 to-amber-600', text: 'text-orange-700' },
+    { k: 'upcoming', label: 'Upcoming (7d)', icon: '📅', count: data.counts.upcoming || 0, color: 'from-blue-500 to-cyan-600', text: 'text-blue-700' },
+    { k: 'completed', label: 'Completed', icon: '✅', count: data.counts.completed || 0, color: 'from-emerald-500 to-teal-600', text: 'text-emerald-700' },
+  ];
+
+  const rows = data[tab] || [];
+  const todayStr = new Date().toISOString().slice(0,10);
+
+  return (
+    <div className="space-y-4">
+      {/* Tab KPI Cards */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        {tabs.map(t => (
+          <button key={t.k} onClick={() => setTab(t.k)} className="text-left">
+            <Card className={`rounded-2xl border-0 shadow-sm hover:shadow-xl transition ${tab === t.k ? 'ring-2 ring-orange-500 scale-[1.02]' : ''}`}>
+              <CardContent className={`p-4 bg-gradient-to-br ${t.color} text-white rounded-2xl relative overflow-hidden`}>
+                <div className="absolute -right-6 -top-6 w-24 h-24 rounded-full bg-white/10 blur-xl" />
+                <div className="relative flex items-start justify-between">
+                  <span className="text-2xl">{t.icon}</span>
+                  <div className="text-4xl font-black">{t.count}</div>
+                </div>
+                <div className="mt-2 text-sm font-bold uppercase tracking-wider opacity-90 relative">{t.label}</div>
+              </CardContent>
+            </Card>
+          </button>
+        ))}
+      </div>
+
+      {/* Rows */}
+      <Card className="rounded-2xl border-0 shadow-sm">
+        <CardHeader className="pb-3"><CardTitle className="flex items-center gap-2">{tabs.find(t => t.k === tab)?.icon} {tabs.find(t => t.k === tab)?.label} <Badge className="bg-slate-900 text-white border-0 ml-1">{rows.length}</Badge></CardTitle><CardDescription>Follow-up log, snooze, or log the call outcome</CardDescription></CardHeader>
+        <CardContent className="space-y-2">
+          {rows.map(l => {
+            const stage = stages.find(s => s.key === l.status) || stages[0];
+            const overdue = l.followupDate && l.followupDate < todayStr;
+            return (
+              <div key={l.id} className={`p-3 rounded-xl border-2 flex items-center gap-3 flex-wrap transition hover:shadow-md ${overdue && tab !== 'completed' ? 'border-red-200 bg-red-50/30' : tab === 'completed' ? 'border-emerald-200 bg-emerald-50/30' : 'border-slate-200 bg-white'}`}>
+                <Avatar className="w-11 h-11"><AvatarFallback className="bg-gradient-to-br from-orange-500 to-red-500 text-white font-bold">{initials(l.name)}</AvatarFallback></Avatar>
+                <div className="flex-1 min-w-[180px]">
+                  <div className="font-bold text-slate-900 flex items-center gap-2 flex-wrap">{l.name}<Badge className={`${stage.chip} border-0 text-[10px]`}>{stage.label}</Badge>{l.assignedToName && <span className="text-[10px] text-slate-500">· {l.assignedToName}</span>}</div>
+                  <div className="text-xs text-slate-500 flex items-center gap-3 flex-wrap mt-0.5">
+                    <span className="flex items-center gap-1"><Phone className="w-3 h-3" /> {l.phone}</span>
+                    <span>{l.course}</span>
+                    <span className={overdue && tab !== 'completed' ? 'text-red-600 font-bold' : ''}>Followup: <b>{l.followupDate || '—'}</b>{overdue && tab !== 'completed' && ' · OVERDUE'}</span>
+                  </div>
+                  {l.lastFollowup && <div className="text-[11px] text-slate-500 mt-1 italic">Last: {l.lastFollowup.outcome?.replace('_',' ')} · {l.lastFollowup.notes || 'no notes'}</div>}
+                </div>
+                <div className="flex items-center gap-1">
+                  <Button size="sm" variant="outline" onClick={() => openWhatsApp(l.phone, `Hi ${l.name}, Zero to Skill here about ${l.course}`)} className="text-emerald-700 border-emerald-200"><MessageCircle className="w-3.5 h-3.5" /></Button>
+                  <a href={`tel:${l.phone}`}><Button size="sm" variant="outline" className="text-blue-700 border-blue-200"><Phone className="w-3.5 h-3.5" /></Button></a>
+                  {tab !== 'completed' && <>
+                    <Button size="sm" variant="outline" onClick={() => snooze(l, 1)} title="Snooze +1 day">+1d</Button>
+                    <Button size="sm" variant="outline" onClick={() => snooze(l, 3)} title="Snooze +3 days">+3d</Button>
+                    <Button size="sm" onClick={() => openLog(l)} className="bg-orange-500 hover:bg-orange-600 text-white"><CheckCircle2 className="w-3.5 h-3.5 mr-1" /> Log Call</Button>
+                  </>}
+                  <Button size="sm" variant="ghost" onClick={() => onOpen(l)}><Eye className="w-3.5 h-3.5" /></Button>
+                </div>
+              </div>
+            );
+          })}
+          {!rows.length && <div className="text-center py-12 text-slate-400"><Bell className="w-16 h-16 mx-auto opacity-30 mb-2" /><div className="text-lg font-semibold">All clear ✨</div><div className="text-sm">Nothing in this bucket right now</div></div>}
+        </CardContent>
+      </Card>
+
+      {/* Log Call Dialog */}
+      <Dialog open={!!logLead} onOpenChange={(o) => !o && setLogLead(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader><DialogTitle className="flex items-center gap-2"><CheckCircle2 className="w-5 h-5 text-orange-500" /> Log Follow-up Call</DialogTitle>{logLead && <DialogDescription>{logLead.name} · {logLead.phone}</DialogDescription>}</DialogHeader>
+          <div className="space-y-3">
+            <div>
+              <Label className="text-xs font-bold uppercase text-slate-500">Call Outcome *</Label>
+              <div className="grid grid-cols-2 gap-2 mt-2">
+                {OUTCOMES.map(o => (
+                  <button key={o.k} onClick={() => setLogForm(f => ({ ...f, outcome: o.k }))} className={`p-2 rounded-xl border-2 text-left transition ${logForm.outcome === o.k ? 'border-orange-500 bg-orange-50' : 'border-slate-200 hover:border-orange-300'}`}>
+                    <div className={`flex items-center gap-2 text-xs font-bold`}>
+                      <span className={`w-1.5 h-1.5 rounded-full ${o.dot}`} /> {o.label}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+            <Field label="Notes"><Textarea rows={3} placeholder="What did they say? Any key details…" value={logForm.notes} onChange={e => setLogForm(f => ({ ...f, notes: e.target.value }))} /></Field>
+            <Field label="Next Follow-up Date"><Input type="date" value={logForm.nextFollowupDate} onChange={e => setLogForm(f => ({ ...f, nextFollowupDate: e.target.value }))} /></Field>
+          </div>
+          <DialogFooter><Button variant="outline" onClick={() => setLogLead(null)}>Cancel</Button><Button onClick={submitLog} className="bg-orange-500 hover:bg-orange-600 text-white">Save & Reschedule</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+// ---------------- ADVANCED SPREADSHEET VIEW (Excel-like) ----------------
+const ROW_COLOR_META = {
+  inquiry: 'bg-white',
+  contacted: 'bg-blue-50/60',
+  counseling: 'bg-amber-50/60',
+  demo_scheduled: 'bg-cyan-50/60',
+  fees_pending: 'bg-orange-50/80',
+  confirmed: 'bg-emerald-50/60',
+  onboarded: 'bg-emerald-100/60',
+  dropped: 'bg-slate-100/60 text-slate-400',
+};
+
+function SpreadsheetView({ leads, stages, moveLead, del, setDetailLead, managers, isSalesManager, reload }) {
+  const [sortBy, setSortBy] = useState({ col: 'createdAt', dir: 'desc' });
+  const [editing, setEditing] = useState(null); // {leadId, field}
+  const [editVal, setEditVal] = useState('');
+  const [colFilters, setColFilters] = useState({});
+  const [customRowColors, setCustomRowColors] = useState(() => {
+    if (typeof window === 'undefined') return {};
+    try { return JSON.parse(localStorage.getItem('zts_row_colors') || '{}'); } catch { return {}; }
+  });
+
+  const toggleSort = (col) => setSortBy(s => s.col === col ? { col, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { col, dir: 'asc' });
+
+  const setColorForRow = (id, cls) => {
+    const next = { ...customRowColors };
+    if (!cls) delete next[id]; else next[id] = cls;
+    setCustomRowColors(next);
+    localStorage.setItem('zts_row_colors', JSON.stringify(next));
+  };
+
+  // Apply column filters
+  const filtered = leads.filter(l => {
+    for (const [k, v] of Object.entries(colFilters)) {
+      if (!v) continue;
+      const cell = String(l[k] || '').toLowerCase();
+      if (!cell.includes(v.toLowerCase())) return false;
+    }
+    return true;
+  });
+
+  // Sort
+  const sorted = [...filtered].sort((a, b) => {
+    const va = a[sortBy.col] || ''; const vb = b[sortBy.col] || '';
+    const r = String(va).localeCompare(String(vb));
+    return sortBy.dir === 'asc' ? r : -r;
+  });
+
+  const startEdit = (leadId, field, current) => { setEditing({ leadId, field }); setEditVal(current || ''); };
+  const commitEdit = async () => {
+    if (!editing) return;
+    try {
+      await api(`/leads/${editing.leadId}`, { method: 'PATCH', body: JSON.stringify({ [editing.field]: editVal }) });
+      toast.success('Updated');
+      reload();
+    } catch (e) { toast.error(e.message); }
+    setEditing(null);
+  };
+
+  const exportCSV = () => {
+    const headers = ['Name','Course','Source','Phone','Email','City','Stage','Notes','Followup Date','Assigned To','Created At'];
+    const rows = sorted.map(l => [l.name, l.course, l.source, l.phone, l.email, l.city, l.status, (l.notes||'').replace(/,/g, ' '), l.followupDate, l.assignedToName || '', l.createdAt].map(v => `"${(v||'').toString().replace(/"/g,'""')}"`).join(','));
+    const csv = [headers.join(','), ...rows].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = `leads_${new Date().toISOString().slice(0,10)}.csv`; a.click();
+    URL.revokeObjectURL(url);
+    toast.success(`${sorted.length} leads exported to CSV`);
+  };
+
+  const todayStr = new Date().toISOString().slice(0,10);
+  const isOverdue = (l) => l.followupDate && l.followupDate < todayStr && !['confirmed','onboarded','dropped'].includes(l.status);
+
+  const columns = [
+    { k: 'name', label: 'Name', w: 'min-w-[150px]', editable: true },
+    { k: 'phone', label: 'Phone', w: 'min-w-[120px]', editable: true },
+    { k: 'email', label: 'Email', w: 'min-w-[180px]', editable: true },
+    { k: 'city', label: 'City', w: 'min-w-[100px]', editable: true },
+    { k: 'course', label: 'Course', w: 'min-w-[140px]', editable: false },
+    { k: 'source', label: 'Source', w: 'min-w-[110px]', editable: false },
+    { k: 'status', label: 'Stage', w: 'min-w-[140px]', editable: false },
+    { k: 'followupDate', label: 'Followup', w: 'min-w-[110px]', editable: true, type: 'date' },
+    { k: 'assignedToName', label: 'Owner', w: 'min-w-[120px]', editable: false },
+    { k: 'notes', label: 'Notes', w: 'min-w-[200px]', editable: true },
+  ];
+
+  const colorPalette = [
+    { k: 'bg-red-100', color: '#fecaca', label: 'Red' },
+    { k: 'bg-orange-100', color: '#fed7aa', label: 'Orange' },
+    { k: 'bg-amber-100', color: '#fde68a', label: 'Amber' },
+    { k: 'bg-emerald-100', color: '#bbf7d0', label: 'Green' },
+    { k: 'bg-cyan-100', color: '#a5f3fc', label: 'Cyan' },
+    { k: 'bg-violet-100', color: '#ddd6fe', label: 'Violet' },
+    { k: 'bg-pink-100', color: '#fbcfe8', label: 'Pink' },
+  ];
+
+  return (
+    <Card className="rounded-2xl border-0 shadow-sm overflow-hidden">
+      {/* Toolbar */}
+      <div className="flex items-center justify-between flex-wrap gap-2 p-3 bg-slate-50 border-b">
+        <div className="flex items-center gap-2 flex-wrap">
+          <Badge className="bg-slate-900 text-white border-0 gap-1"><Sheet className="w-3 h-3" /> Spreadsheet · {sorted.length} rows</Badge>
+          <Badge className="bg-emerald-100 text-emerald-700 border-0">Click any cell to edit</Badge>
+          <Badge className="bg-amber-100 text-amber-700 border-0">Click column header to sort</Badge>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button size="sm" variant="outline" onClick={() => { setColFilters({}); setSortBy({ col: 'createdAt', dir: 'desc' }); setCustomRowColors({}); localStorage.removeItem('zts_row_colors'); }}>Clear</Button>
+          <Button size="sm" onClick={exportCSV} className="bg-emerald-600 hover:bg-emerald-700 text-white"><Download className="w-3.5 h-3.5 mr-1" /> Export CSV</Button>
+        </div>
+      </div>
+
+      {/* Spreadsheet */}
+      <div className="overflow-auto max-h-[70vh]">
+        <table className="w-full text-xs border-collapse">
+          <thead className="sticky top-0 z-10">
+            <tr className="bg-gradient-to-r from-slate-900 to-slate-800 text-white">
+              <th className="px-2 py-2 border border-slate-700 w-10 text-center">#</th>
+              {columns.map(c => (
+                <th key={c.k} className={`px-3 py-2 border border-slate-700 text-left font-bold cursor-pointer hover:bg-slate-700 ${c.w}`} onClick={() => toggleSort(c.k)}>
+                  <div className="flex items-center gap-1">{c.label}{sortBy.col === c.k && <span className="text-amber-300">{sortBy.dir === 'asc' ? '▲' : '▼'}</span>}</div>
+                </th>
+              ))}
+              <th className="px-3 py-2 border border-slate-700 w-20 text-center">Color</th>
+              <th className="px-3 py-2 border border-slate-700 w-28 text-center">Actions</th>
+            </tr>
+            {/* Column filter row */}
+            <tr className="bg-slate-100">
+              <td className="border border-slate-300 text-center text-[10px] font-bold text-slate-400">🔍</td>
+              {columns.map(c => (
+                <td key={c.k} className="border border-slate-300 p-0">
+                  <Input placeholder="filter..." value={colFilters[c.k] || ''} onChange={e => setColFilters(f => ({ ...f, [c.k]: e.target.value }))} className="h-7 text-[11px] rounded-none border-0 bg-transparent focus:bg-white" />
+                </td>
+              ))}
+              <td className="border border-slate-300" colSpan={2}></td>
+            </tr>
+          </thead>
+          <tbody>
+            {sorted.map((l, i) => {
+              const stage = stages.find(s => s.key === l.status) || stages[0];
+              const customColor = customRowColors[l.id];
+              const bg = customColor || ROW_COLOR_META[l.status] || (i % 2 === 0 ? 'bg-white' : 'bg-slate-50/50');
+              const overdueCls = isOverdue(l) ? 'ring-2 ring-red-400 ring-inset' : '';
+              return (
+                <tr key={l.id} className={`${bg} ${overdueCls} hover:bg-orange-50 transition group`}>
+                  <td className="px-2 py-1 border border-slate-200 text-center font-bold text-slate-400">{i + 1}</td>
+                  {columns.map(c => {
+                    const isEditing = editing?.leadId === l.id && editing?.field === c.k;
+                    const value = l[c.k];
+                    return (
+                      <td key={c.k} className={`border border-slate-200 ${c.w}`} onDoubleClick={() => c.editable && startEdit(l.id, c.k, value)}>
+                        {isEditing ? (
+                          <Input type={c.type || 'text'} autoFocus value={editVal} onChange={e => setEditVal(e.target.value)} onBlur={commitEdit} onKeyDown={e => { if (e.key === 'Enter') commitEdit(); if (e.key === 'Escape') setEditing(null); }} className="h-7 rounded-none text-[11px] border-orange-400 border-2 bg-amber-50 font-semibold" />
+                        ) : c.k === 'status' ? (
+                          <div className="px-2 py-1" onClick={e => e.stopPropagation()}>
+                            <Select value={l.status} onValueChange={v => moveLead(l.id, v)}><SelectTrigger className="h-6 text-[10px] rounded px-2 border-slate-300"><Badge className={`${stage.chip} border-0 text-[10px] w-full`}>{stage.label}</Badge></SelectTrigger><SelectContent>{stages.map(s => <SelectItem key={s.key} value={s.key} className="text-xs">{s.label}</SelectItem>)}</SelectContent></Select>
+                          </div>
+                        ) : (
+                          <div className={`px-2 py-1.5 ${c.editable ? 'cursor-text hover:bg-amber-50' : 'cursor-default'} ${c.k === 'name' ? 'font-bold text-slate-900' : ''} truncate max-w-[220px]`} title={value || ''} onClick={() => c.editable && startEdit(l.id, c.k, value)}>
+                            {c.k === 'followupDate' && isOverdue(l) && value && <span className="text-red-600 font-bold mr-1">⚠</span>}
+                            {value || <span className="text-slate-300">—</span>}
+                          </div>
+                        )}
+                      </td>
+                    );
+                  })}
+                  {/* Color picker */}
+                  <td className="border border-slate-200 text-center">
+                    <div className="flex items-center justify-center gap-0.5 opacity-30 group-hover:opacity-100 transition p-1">
+                      {colorPalette.map(c => (
+                        <button key={c.k} onClick={() => setColorForRow(l.id, customColor === c.k ? null : c.k)} className={`w-3 h-3 rounded-full border ${customColor === c.k ? 'border-slate-900 ring-1 ring-offset-1 ring-slate-900' : 'border-slate-300'}`} style={{ background: c.color }} title={c.label} />
+                      ))}
+                    </div>
+                  </td>
+                  <td className="border border-slate-200 text-center" onClick={e => e.stopPropagation()}>
+                    <div className="flex items-center justify-center gap-0.5">
+                      <button onClick={() => setDetailLead(l)} className="text-orange-600 hover:bg-orange-100 rounded p-1" title="Open"><Eye className="w-3.5 h-3.5" /></button>
+                      <button onClick={() => openWhatsApp(l.phone, `Hi ${l.name}`)} className="text-emerald-600 hover:bg-emerald-50 rounded p-1" title="WhatsApp"><MessageCircle className="w-3.5 h-3.5" /></button>
+                      <button onClick={() => del(l.id)} className="text-red-500 hover:bg-red-50 rounded p-1" title="Delete"><Trash2 className="w-3.5 h-3.5" /></button>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+            {!sorted.length && <tr><td colSpan={13} className="text-center py-10 text-slate-400">No rows match the current filters</td></tr>}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Legend / tips */}
+      <div className="p-3 bg-slate-50 border-t flex items-center gap-4 flex-wrap text-[11px] text-slate-600">
+        <div className="font-bold">Row colors:</div>
+        <div className="flex items-center gap-1"><div className="w-3 h-3 rounded bg-emerald-100 border border-emerald-200" /> Confirmed/Won</div>
+        <div className="flex items-center gap-1"><div className="w-3 h-3 rounded bg-orange-100 border border-orange-200" /> Fees Pending</div>
+        <div className="flex items-center gap-1"><div className="w-3 h-3 rounded bg-amber-100 border border-amber-200" /> Counseling</div>
+        <div className="flex items-center gap-1"><div className="w-3 h-3 rounded bg-blue-100 border border-blue-200" /> Contacted</div>
+        <div className="flex items-center gap-1"><div className="w-3 h-3 rounded ring-2 ring-red-400 bg-white" /> Overdue follow-up</div>
+        <div className="ml-auto italic">Double-click any cell to edit · Click column header to sort · Use color dots to flag any row</div>
+      </div>
+    </Card>
+  );
+}
 
 function AddLeadDialog({ open, setOpen, onCreated, courses, managers = [], isSalesManager }) {
   const [form, setForm] = useState({ name: '', email: '', phone: '', course: '', source: 'Website Form', notes: '', followupDate: '', parentName: '', parentPhone: '', city: '', assignedTo: '' });
