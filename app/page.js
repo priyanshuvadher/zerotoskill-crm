@@ -37,6 +37,7 @@ const ROLE_META = {
   academic_manager: { label: 'Academic Manager', chip: 'bg-blue-100 text-blue-800' },
   faculty: { label: 'Faculty', chip: 'bg-emerald-100 text-emerald-800' },
   counselor: { label: 'Counselor', chip: 'bg-purple-100 text-purple-800' },
+  sales_manager: { label: 'Sales Manager', chip: 'bg-amber-100 text-amber-800' },
   student: { label: 'Student', chip: 'bg-pink-100 text-pink-800' },
 };
 
@@ -142,6 +143,7 @@ function Sidebar({ user, active, setActive, onLogout, open, setOpen, collapsed, 
     academic_manager: ['dashboard', 'students', 'batches', 'faculty', 'courses', 'lms', 'assignments', 'community', 'settings'],
     faculty: ['dashboard', 'students', 'batches', 'lms', 'assignments', 'community', 'settings'],
     counselor: ['dashboard', 'admissions', 'students', 'fees', 'payments', 'community', 'settings'],
+    sales_manager: ['dashboard', 'admissions', 'community', 'settings'],
     student: ['dashboard', 'fees', 'lms', 'assignments', 'community', 'settings'],
   };
   const items = [
@@ -706,18 +708,23 @@ function Students({ currentUser }) {
 function Admissions({ currentUser }) {
   const [leads, setLeads] = useState([]);
   const [followups, setFollowups] = useState([]);
+  const [managers, setManagers] = useState([]);
   const [view, setView] = useState('kanban');
   const [search, setSearch] = useState('');
   const [stageFilter, setStageFilter] = useState('all');
+  const [managerFilter, setManagerFilter] = useState('all');
+  const [dateQuickFilter, setDateQuickFilter] = useState('all'); // all | today | yesterday | this_week | this_month
   const [addOpen, setAddOpen] = useState(false);
   const [dragId, setDragId] = useState(null);
-  const [activeMonth, setActiveMonth] = useState('all'); // 'all' | 'YYYY-MM' | '__ALL__'
-  const [detailLead, setDetailLead] = useState(null); // lead detail dialog
+  const [activeMonth, setActiveMonth] = useState('all');
+  const [detailLead, setDetailLead] = useState(null);
   const [customStages, setCustomStages] = useState(() => {
     if (typeof window === 'undefined') return [];
     try { return JSON.parse(localStorage.getItem('zts_custom_stages') || '[]'); } catch { return []; }
   });
   const courses = useCourses();
+  const isSalesManager = currentUser?.role === 'sales_manager';
+  const isAdminLike = ['super_admin', 'academic_manager', 'counselor'].includes(currentUser?.role);
 
   const ALL_STAGES = [...STAGES, ...customStages];
 
@@ -737,7 +744,15 @@ function Admissions({ currentUser }) {
     notify('Column removed');
   };
 
-  const load = async () => { try { const [l, f] = await Promise.all([api('/leads'), api('/leads/today-followups')]); setLeads(l.leads); setFollowups(f.followups); } catch (e) { toast.error(e.message); } };
+  const load = async () => {
+    try {
+      const [l, f] = await Promise.all([api('/leads'), api('/leads/today-followups')]);
+      setLeads(l.leads); setFollowups(f.followups);
+      if (!isSalesManager) {
+        try { const m = await api('/sales-managers'); setManagers(m.managers || []); } catch {}
+      }
+    } catch (e) { toast.error(e.message); }
+  };
   useEffect(() => { load(); }, []);
 
   const moveLead = async (id, status) => { setLeads(ls => ls.map(l => l.id === id ? { ...l, status } : l)); try { await api('/leads/status', { method: 'PATCH', body: JSON.stringify({ id, status }) }); notify('Lead moved', STAGES.find(s => s.key === status).label); } catch (e) { toast.error(e.message); load(); } };
@@ -758,6 +773,19 @@ function Admissions({ currentUser }) {
   const filtered = leads.filter(l => {
     if (activeMonth !== 'all' && activeMonth !== '__ALL__' && getMonthKey(l) !== activeMonth) return false;
     if (stageFilter !== 'all' && l.status !== stageFilter) return false;
+    if (managerFilter !== 'all') {
+      if (managerFilter === 'unassigned' && l.assignedTo) return false;
+      if (managerFilter !== 'unassigned' && l.assignedTo !== managerFilter) return false;
+    }
+    if (dateQuickFilter !== 'all') {
+      const d = new Date(l.createdAt);
+      const today = new Date(); today.setHours(0,0,0,0);
+      const dStart = new Date(d); dStart.setHours(0,0,0,0);
+      if (dateQuickFilter === 'today' && dStart.getTime() !== today.getTime()) return false;
+      if (dateQuickFilter === 'yesterday') { const y = new Date(today); y.setDate(y.getDate()-1); if (dStart.getTime() !== y.getTime()) return false; }
+      if (dateQuickFilter === 'this_week') { const wStart = new Date(today); wStart.setDate(wStart.getDate() - wStart.getDay()); if (d < wStart) return false; }
+      if (dateQuickFilter === 'this_month') { if (d.getFullYear() !== today.getFullYear() || d.getMonth() !== today.getMonth()) return false; }
+    }
     if (!search) return true;
     const q = search.toLowerCase();
     return l.name?.toLowerCase().includes(q) || l.course?.toLowerCase().includes(q) || l.phone?.includes(search);
@@ -787,9 +815,60 @@ function Admissions({ currentUser }) {
           <div className="flex bg-white border rounded-full p-0.5">{[{k:'kanban',I:Kanban,L:'Kanban'},{k:'list',I:List,L:'List'},{k:'excel',I:Sheet,L:'Excel'}].map(v => (<button key={v.k} onClick={() => setView(v.k)} className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-medium ${view === v.k ? 'bg-orange-500 text-white' : 'text-slate-600 hover:bg-slate-100'}`}><v.I className="w-3.5 h-3.5" /> {v.L}</button>))}</div>
           <div className="relative"><Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" /><Input placeholder="Search..." className="pl-9 w-56 rounded-full bg-white" value={search} onChange={e => setSearch(e.target.value)} /></div>
           <Select value={stageFilter} onValueChange={setStageFilter}><SelectTrigger className="w-36 rounded-full bg-white"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All Stages</SelectItem>{STAGES.map(s => <SelectItem key={s.key} value={s.key}>{s.label}</SelectItem>)}</SelectContent></Select>
-          <AddLeadDialog open={addOpen} setOpen={setAddOpen} onCreated={load} courses={courses} />
+          {!isSalesManager && managers.length > 0 && (
+            <Select value={managerFilter} onValueChange={setManagerFilter}><SelectTrigger className="w-44 rounded-full bg-white"><SelectValue placeholder="All Sales Managers" /></SelectTrigger><SelectContent>
+              <SelectItem value="all">All Sales Managers</SelectItem>
+              <SelectItem value="unassigned">— Unassigned —</SelectItem>
+              {managers.map(m => <SelectItem key={m.id} value={m.id}>{m.name} ({m.leadsCount || 0})</SelectItem>)}
+            </SelectContent></Select>
+          )}
+          <AddLeadDialog open={addOpen} setOpen={setAddOpen} onCreated={load} courses={courses} managers={managers} isSalesManager={isSalesManager} />
         </div>
       </div>
+
+      {/* Date Quick Filters + Sales Manager Workspace Badge */}
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div className="inline-flex bg-slate-100 p-1 rounded-full">
+          {[
+            { k: 'all', label: 'All Dates' },
+            { k: 'today', label: 'Today' },
+            { k: 'yesterday', label: 'Yesterday' },
+            { k: 'this_week', label: 'This Week' },
+            { k: 'this_month', label: 'This Month' },
+          ].map(t => (
+            <button key={t.k} onClick={() => setDateQuickFilter(t.k)} className={`px-4 py-1.5 rounded-full text-xs font-semibold transition ${dateQuickFilter === t.k ? 'bg-white shadow text-slate-900' : 'text-slate-600 hover:text-slate-900'}`}>{t.label}</button>
+          ))}
+        </div>
+        {isSalesManager && (
+          <Badge className="bg-amber-100 text-amber-800 border-0"><Users className="w-3 h-3 mr-1" /> Your private workspace · Only you can see these leads</Badge>
+        )}
+      </div>
+
+      {/* Sales Manager KPI Cards (admin view only) */}
+      {!isSalesManager && managers.length > 0 && (
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+          {managers.map(m => {
+            const active = managerFilter === m.id;
+            return (
+              <button key={m.id} onClick={() => setManagerFilter(active ? 'all' : m.id)} className="text-left">
+                <Card className={`rounded-2xl border-0 shadow-sm hover:shadow-lg transition ${active ? 'ring-2 ring-orange-500' : ''}`}>
+                  <CardContent className="p-4">
+                    <div className="flex items-center gap-3">
+                      <Avatar className="w-10 h-10"><AvatarFallback className="bg-gradient-to-br from-amber-500 to-orange-600 text-white font-bold">{initials(m.name)}</AvatarFallback></Avatar>
+                      <div className="flex-1 min-w-0"><div className="font-bold text-slate-900 truncate">{m.name}</div><div className="text-[10px] uppercase text-slate-400 font-bold">Sales Manager</div></div>
+                    </div>
+                    <div className="grid grid-cols-3 gap-2 mt-3">
+                      <div><div className="text-[10px] text-slate-500">Leads</div><div className="font-bold">{m.leadsCount || 0}</div></div>
+                      <div><div className="text-[10px] text-emerald-700">Won</div><div className="font-bold text-emerald-700">{m.convertedCount || 0}</div></div>
+                      <div><div className="text-[10px] text-red-600">Due</div><div className="font-bold text-red-600">{m.pendingFollowups || 0}</div></div>
+                    </div>
+                  </CardContent>
+                </Card>
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {/* Monthly Folders */}
       {activeMonth === 'all' && (
@@ -875,6 +954,7 @@ function Admissions({ currentUser }) {
                     <div className="flex items-start justify-between gap-2"><div className="flex-1 min-w-0"><div className="font-semibold text-sm truncate">{l.name}</div><div className="text-xs text-slate-500 truncate">{l.course}</div></div><Badge variant="outline" className="text-[10px] px-1.5">{l.source}</Badge></div>
                     <div className="mt-2 space-y-1 text-xs text-slate-600"><div className="flex items-center gap-1.5"><Phone className="w-3 h-3" />{l.phone}</div></div>
                     {l.notes && <div className="mt-2 text-[11px] text-slate-500 bg-amber-50 border-l-2 border-amber-400 px-2 py-1 rounded truncate italic">📝 {l.notes}</div>}
+                    {l.assignedToName && <div className="mt-1.5 flex items-center gap-1 text-[10px]"><div className="w-4 h-4 rounded-full bg-gradient-to-br from-amber-500 to-orange-600 text-white flex items-center justify-center text-[8px] font-bold">{initials(l.assignedToName)}</div><span className="text-slate-600 font-semibold truncate">{l.assignedToName}</span></div>}
                     <div className="mt-2 pt-2 border-t flex items-center justify-between gap-1" onClick={e => e.stopPropagation()}>
                       <button onClick={() => openWhatsApp(l.phone, `Hi ${l.name}, Zero to Skill here about ${l.course}`)} className="text-emerald-600 hover:bg-emerald-50 rounded p-1"><MessageCircle className="w-3.5 h-3.5" /></button>
                       <Select value={l.status} onValueChange={v => moveLead(l.id, v)}><SelectTrigger className="h-7 flex-1 text-[10px]"><SelectValue /></SelectTrigger><SelectContent>{ALL_STAGES.map(s => <SelectItem key={s.key} value={s.key} className="text-xs">{s.label}</SelectItem>)}</SelectContent></Select>
@@ -918,13 +998,13 @@ function Admissions({ currentUser }) {
         <Card className="rounded-2xl border-0 shadow-sm"><CardContent className="p-0 overflow-x-auto"><table className="w-full text-xs border-collapse"><thead className="bg-slate-900 text-white"><tr>{['Name','Course','Source','Phone','City','Stage','Notes','Followup','Actions'].map(h => <th key={h} className="text-left px-3 py-2 font-semibold border border-slate-700">{h}</th>)}</tr></thead><tbody>{filtered.map((l, i) => { const stage = ALL_STAGES.find(s => s.key === l.status) || STAGES[0]; return (<tr key={l.id} className={`cursor-pointer hover:bg-orange-50 ${i % 2 === 0 ? 'bg-white' : 'bg-slate-50'}`} onClick={() => setDetailLead(l)}><td className="px-3 py-2 border font-medium">{l.name}</td><td className="px-3 py-2 border">{l.course}</td><td className="px-3 py-2 border">{l.source}</td><td className="px-3 py-2 border">{l.phone}</td><td className="px-3 py-2 border">{l.city || '—'}</td><td className="px-3 py-2 border"><Badge className={`${stage.chip} border-0 text-[10px]`}>{stage.label}</Badge></td><td className="px-3 py-2 border max-w-[180px] truncate italic text-amber-700">{l.notes ? '📝 ' + l.notes : <span className="text-slate-300">—</span>}</td><td className="px-3 py-2 border">{l.followupDate || '—'}</td><td className="px-3 py-2 border" onClick={e => e.stopPropagation()}><div className="flex items-center gap-1"><Select value={l.status} onValueChange={v => moveLead(l.id, v)}><SelectTrigger className="h-6 text-[10px] w-24"><SelectValue /></SelectTrigger><SelectContent>{ALL_STAGES.map(s => <SelectItem key={s.key} value={s.key} className="text-xs">{s.label}</SelectItem>)}</SelectContent></Select><button onClick={() => setDetailLead(l)} className="text-orange-600 hover:bg-orange-50 rounded p-1"><Edit3 className="w-3 h-3" /></button><button onClick={() => del(l.id)} className="text-red-500 hover:bg-red-50 rounded p-1"><Trash2 className="w-3 h-3" /></button></div></td></tr>);})}</tbody></table></CardContent></Card>
       )}
 
-      <LeadDetailDialog lead={detailLead} onClose={() => setDetailLead(null)} onUpdated={load} onDelete={async (id) => { await del(id); setDetailLead(null); }} stages={ALL_STAGES} courses={courses} />
+      <LeadDetailDialog lead={detailLead} onClose={() => setDetailLead(null)} onUpdated={load} onDelete={async (id) => { await del(id); setDetailLead(null); }} stages={ALL_STAGES} courses={courses} managers={managers} isSalesManager={isSalesManager} />
     </div>
   );
 }
 
 // ---------------- LEAD DETAIL DIALOG ----------------
-function LeadDetailDialog({ lead, onClose, onUpdated, onDelete, stages, courses }) {
+function LeadDetailDialog({ lead, onClose, onUpdated, onDelete, stages, courses, managers = [], isSalesManager }) {
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState({});
   useEffect(() => {
@@ -961,6 +1041,7 @@ function LeadDetailDialog({ lead, onClose, onUpdated, onDelete, stages, courses 
               <InfoRow icon={MapPin} label="City" value={lead.city || '—'} />
               <InfoRow icon={CalendarDays} label="Follow-up Date" value={lead.followupDate || '—'} />
               <InfoRow icon={Users} label="Parent" value={lead.parentName || '—'} />
+              <InfoRow icon={UserCog} label="Assigned To" value={lead.assignedToName || '— Unassigned —'} />
             </div>
             <div className="mt-3">
               <div className="text-xs text-slate-500 font-semibold uppercase mb-1">Notes</div>
@@ -990,6 +1071,17 @@ function LeadDetailDialog({ lead, onClose, onUpdated, onDelete, stages, courses 
               <Field label="Followup Date"><Input type="date" value={form.followupDate || ''} onChange={e => setForm(f => ({ ...f, followupDate: e.target.value }))} /></Field>
               <Field label="Parent Name"><Input value={form.parentName || ''} onChange={e => setForm(f => ({ ...f, parentName: e.target.value }))} /></Field>
               <Field label="Parent Phone"><Input value={form.parentPhone || ''} onChange={e => setForm(f => ({ ...f, parentPhone: e.target.value }))} /></Field>
+              {!isSalesManager && (
+                <Field label="Assign To Sales Manager" full>
+                  <Select value={form.assignedTo || 'none'} onValueChange={v => setForm(f => ({ ...f, assignedTo: v === 'none' ? null : v }))}>
+                    <SelectTrigger><SelectValue placeholder="— Unassigned —" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">— Unassigned —</SelectItem>
+                      {managers.map(m => <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </Field>
+              )}
               <Field label="Notes" full><Textarea rows={4} placeholder="Anything you want to remember about this lead…" value={form.notes || ''} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} /></Field>
             </div>
             <DialogFooter className="mt-2">
@@ -1010,27 +1102,43 @@ const InfoRow = ({ icon: Icon, label, value }) => (
   </div>
 );
 
-function AddLeadDialog({ open, setOpen, onCreated, courses }) {
-  const [form, setForm] = useState({ name: '', email: '', phone: '', course: '', source: 'Website Form', notes: '', followupDate: '', parentName: '', parentPhone: '', city: '' });
+function AddLeadDialog({ open, setOpen, onCreated, courses, managers = [], isSalesManager }) {
+  const [form, setForm] = useState({ name: '', email: '', phone: '', course: '', source: 'Website Form', notes: '', followupDate: '', parentName: '', parentPhone: '', city: '', assignedTo: '' });
   useEffect(() => { if (courses.length && !form.course) setForm(f => ({ ...f, course: courses[0].name })); }, [courses]);
   const change = (k, v) => setForm(f => ({ ...f, [k]: v }));
   const submit = async () => {
     if (!form.name || !form.phone) return toast.error('Name and phone required');
-    try { await api('/leads', { method: 'POST', body: JSON.stringify(form) }); notify('Lead added', form.name); setOpen(false); onCreated(); setForm({ ...form, name: '', email: '', phone: '', notes: '' }); }
-    catch (e) { toast.error(e.message); }
+    try {
+      const body = { ...form, assignedTo: form.assignedTo || null };
+      await api('/leads', { method: 'POST', body: JSON.stringify(body) });
+      notify('Lead added', form.name);
+      setOpen(false); onCreated();
+      setForm({ ...form, name: '', email: '', phone: '', notes: '' });
+    } catch (e) { toast.error(e.message); }
   };
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild><Button className="rounded-full bg-orange-500 hover:bg-orange-600 text-white"><Plus className="w-4 h-4 mr-1" /> New Lead</Button></DialogTrigger>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader><DialogTitle>Capture New Lead</DialogTitle></DialogHeader>
+        <DialogHeader><DialogTitle>Capture New Lead</DialogTitle><DialogDescription>{isSalesManager ? 'This lead will be assigned to you automatically.' : 'Pick a sales manager to own this lead, or leave unassigned.'}</DialogDescription></DialogHeader>
         <div className="grid grid-cols-2 gap-3">
           <Field label="Full Name *"><Input value={form.name} onChange={e => change('name', e.target.value)} /></Field>
           <Field label="Phone *"><Input value={form.phone} onChange={e => change('phone', e.target.value)} /></Field>
           <Field label="Email"><Input value={form.email} onChange={e => change('email', e.target.value)} /></Field>
           <Field label="City"><Input value={form.city} onChange={e => change('city', e.target.value)} /></Field>
           <Field label="Course"><Select value={form.course} onValueChange={v => change('course', v)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{courses.map(c => <SelectItem key={c.id} value={c.name}>{c.name}</SelectItem>)}</SelectContent></Select></Field>
-          <Field label="Source"><Select value={form.source} onValueChange={v => change('source', v)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{['Website Form','Instagram Ad','YouTube Ad','Google Ad','Referral','Walk-in','LinkedIn','WhatsApp'].map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent></Select></Field>
+          <Field label="Source"><Select value={form.source} onValueChange={v => change('source', v)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{['Website Form','Instagram Ad','YouTube Ad','Google Ad','Meta Ads WhatsApp','Referral','Walk-in','LinkedIn','WhatsApp'].map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent></Select></Field>
+          {!isSalesManager && (
+            <Field label="Assign To Sales Manager" full>
+              <Select value={form.assignedTo || 'none'} onValueChange={v => change('assignedTo', v === 'none' ? '' : v)}>
+                <SelectTrigger><SelectValue placeholder="— Unassigned —" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">— Unassigned —</SelectItem>
+                  {managers.map(m => <SelectItem key={m.id} value={m.id}>{m.name} <span className="text-xs text-slate-500">({m.leadsCount || 0} leads)</span></SelectItem>)}
+                </SelectContent>
+              </Select>
+            </Field>
+          )}
           <Field label="Followup Date"><Input type="date" value={form.followupDate} onChange={e => change('followupDate', e.target.value)} /></Field>
           <Field label="Notes" full><Textarea value={form.notes} onChange={e => change('notes', e.target.value)} /></Field>
         </div>
@@ -2605,7 +2713,7 @@ function UserManagement({ currentUser: me }) {
             <Field label="Full Name"><Input value={form.name} onChange={e => setForm({...form, name: e.target.value})} /></Field>
             <Field label="Email"><Input type="email" value={form.email} onChange={e => setForm({...form, email: e.target.value})} /></Field>
             <Field label="Password"><Input value={form.password} onChange={e => setForm({...form, password: e.target.value})} placeholder={editUser ? 'Leave blank to keep' : 'Set password'} /></Field>
-            <Field label="Role"><Select value={form.role} onValueChange={v => setForm({...form, role: v})} disabled={!!editUser}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="super_admin">Super Admin</SelectItem><SelectItem value="academic_manager">Academic Manager</SelectItem><SelectItem value="counselor">Counselor</SelectItem><SelectItem value="faculty">Faculty</SelectItem><SelectItem value="student">Student</SelectItem></SelectContent></Select></Field>
+            <Field label="Role"><Select value={form.role} onValueChange={v => setForm({...form, role: v})} disabled={!!editUser}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="super_admin">Super Admin</SelectItem><SelectItem value="academic_manager">Academic Manager</SelectItem><SelectItem value="counselor">Counselor</SelectItem><SelectItem value="sales_manager">Sales Manager</SelectItem><SelectItem value="faculty">Faculty</SelectItem><SelectItem value="student">Student</SelectItem></SelectContent></Select></Field>
             <Field label="Phone"><Input value={form.phone} onChange={e => setForm({...form, phone: e.target.value})} /></Field>
             {form.role === 'faculty' && <><Field label="Specialization"><Select value={form.specialization} onValueChange={v => setForm({...form, specialization: v})}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{courses.map(c => <SelectItem key={c.id} value={c.name}>{c.name}</SelectItem>)}</SelectContent></Select></Field>
               <Field label="Commission % (optional)"><Input type="number" value={form.commissionPercent} onChange={e => setForm({...form, commissionPercent: Number(e.target.value)})} placeholder="e.g. 10" /></Field></>}

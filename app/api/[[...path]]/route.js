@@ -132,14 +132,32 @@ export async function GET(request, { params }) {
     }
 
     if (route === 'leads') {
-      const leads = await db.collection('leads').find({}, { projection: { _id: 0 } }).sort({ createdAt: -1 }).toArray();
+      const me = await currentUser(request); if (!me) return err('Unauthorized', 401);
+      const filter = me.role === 'sales_manager' ? { assignedTo: me.id } : {};
+      const leads = await db.collection('leads').find(filter, { projection: { _id: 0 } }).sort({ createdAt: -1 }).toArray();
       return ok({ leads });
     }
 
     if (route === 'leads/today-followups') {
+      const me = await currentUser(request); if (!me) return err('Unauthorized', 401);
       const today = new Date().toISOString().slice(0, 10);
-      const leads = await db.collection('leads').find({ followupDate: { $lte: today }, status: { $nin: ['onboarded', 'confirmed'] } }, { projection: { _id: 0 } }).toArray();
+      const filter = { followupDate: { $lte: today }, status: { $nin: ['onboarded', 'confirmed'] } };
+      if (me.role === 'sales_manager') filter.assignedTo = me.id;
+      const leads = await db.collection('leads').find(filter, { projection: { _id: 0 } }).toArray();
       return ok({ followups: leads, count: leads.length, today });
+    }
+
+    // SALES MANAGERS list (for assigning leads)
+    if (route === 'sales-managers') {
+      const me = await currentUser(request); if (!me) return err('Unauthorized', 401);
+      const managers = await db.collection('users').find({ role: 'sales_manager' }, { projection: { _id: 0, password: 0, plainPassword: 0 } }).toArray();
+      // Count leads per manager
+      for (const m of managers) {
+        m.leadsCount = await db.collection('leads').countDocuments({ assignedTo: m.id });
+        m.convertedCount = await db.collection('leads').countDocuments({ assignedTo: m.id, status: { $in: ['confirmed', 'onboarded'] } });
+        m.pendingFollowups = await db.collection('leads').countDocuments({ assignedTo: m.id, followupDate: { $lte: new Date().toISOString().slice(0,10) }, status: { $nin: ['onboarded', 'confirmed'] } });
+      }
+      return ok({ managers });
     }
 
     if (route === 'students') {
@@ -450,8 +468,18 @@ export async function POST(request, { params }) {
     }
 
     if (route === 'leads') {
+      const me = await currentUser(request); if (!me) return err('Unauthorized', 401);
       const body = await request.json();
-      const lead = { id: uuidv4(), status: 'inquiry', createdAt: new Date().toISOString(), ...body };
+      // Auto-assign: sales_manager → self; others can specify assignedTo or leave unassigned
+      let assignedTo = body.assignedTo || null;
+      let assignedToName = body.assignedToName || null;
+      if (me.role === 'sales_manager') {
+        assignedTo = me.id; assignedToName = me.name;
+      } else if (assignedTo) {
+        const sm = await db.collection('users').findOne({ id: assignedTo });
+        if (sm) assignedToName = sm.name;
+      }
+      const lead = { id: uuidv4(), status: 'inquiry', createdAt: new Date().toISOString(), createdBy: me.id, createdByName: me.name, assignedTo, assignedToName, ...body, assignedTo, assignedToName };
       await db.collection('leads').insertOne(lead);
       const { _id, ...safe } = lead;
       return ok({ lead: safe });
@@ -776,12 +804,26 @@ export async function PATCH(request, { params }) {
   const db = await getDb();
   try {
     if (route === 'leads/status') {
+      const me = await currentUser(request); if (!me) return err('Unauthorized', 401);
       const { id, status } = await request.json();
+      const lead = await db.collection('leads').findOne({ id });
+      if (!lead) return err('Lead not found', 404);
+      if (me.role === 'sales_manager' && lead.assignedTo !== me.id) return err('Forbidden — not your lead', 403);
       await db.collection('leads').updateOne({ id }, { $set: { status, updatedAt: new Date().toISOString() } });
       return ok({ success: true });
     }
     if (p[0] === 'leads' && p[1]) {
+      const me = await currentUser(request); if (!me) return err('Unauthorized', 401);
+      const lead = await db.collection('leads').findOne({ id: p[1] });
+      if (!lead) return err('Lead not found', 404);
+      if (me.role === 'sales_manager' && lead.assignedTo !== me.id) return err('Forbidden — not your lead', 403);
       const body = await request.json();
+      // If reassigning, lookup name
+      if (body.assignedTo !== undefined) {
+        if (me.role === 'sales_manager') return err('Only admin can reassign leads', 403);
+        if (!body.assignedTo || body.assignedTo === 'none') { body.assignedTo = null; body.assignedToName = null; }
+        else { const sm = await db.collection('users').findOne({ id: body.assignedTo }); body.assignedToName = sm?.name || null; }
+      }
       await db.collection('leads').updateOne({ id: p[1] }, { $set: { ...body, updatedAt: new Date().toISOString() } });
       return ok({ success: true });
     }
@@ -929,7 +971,14 @@ export async function DELETE(request, { params }) {
   const p = (await params).path || [];
   const db = await getDb();
   try {
-    if (p[0] === 'leads' && p[1]) { await db.collection('leads').deleteOne({ id: p[1] }); return ok({ success: true }); }
+    if (p[0] === 'leads' && p[1]) {
+      const me = await currentUser(request); if (!me) return err('Unauthorized', 401);
+      const lead = await db.collection('leads').findOne({ id: p[1] });
+      if (!lead) return ok({ success: true });
+      if (me.role === 'sales_manager' && lead.assignedTo !== me.id) return err('Forbidden — not your lead', 403);
+      await db.collection('leads').deleteOne({ id: p[1] });
+      return ok({ success: true });
+    }
     if (p[0] === 'users' && p[1]) {
       const me = await currentUser(request); if (!me || me.role !== 'super_admin') return err('Forbidden', 403);
       await db.collection('users').deleteOne({ id: p[1] });
